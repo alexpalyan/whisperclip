@@ -7,12 +7,33 @@ class LocalLLM {
     private static var gpuCacheLimitSet = false
     
     /// Calculate GPU cache limit based on available system memory.
-    /// Uses ~7% of total memory, clamped between 32MB and 4GB.
+    /// Uses tiered ratios with caps to avoid starving low-memory Macs.
     private static func calculateGPUCacheLimit() -> Int {
         let totalMemory = ProcessInfo.processInfo.physicalMemory
-        let cacheLimit = Int(Double(totalMemory) * 0.07)
+        let gb = 1024.0 * 1024.0 * 1024.0
+        let totalGB = Double(totalMemory) / gb
+
+        let ratio: Double
+        let maxCache: Int
+        if totalGB <= 16 {
+            ratio = 0.07
+            maxCache = 4 * 1024 * 1024 * 1024
+        } else if totalGB <= 24 {
+            ratio = 0.10
+            maxCache = 6 * 1024 * 1024 * 1024
+        } else if totalGB <= 32 {
+            ratio = 0.12
+            maxCache = 8 * 1024 * 1024 * 1024
+        } else if totalGB <= 48 {
+            ratio = 0.16
+            maxCache = 12 * 1024 * 1024 * 1024
+        } else {
+            ratio = 0.20
+            maxCache = 16 * 1024 * 1024 * 1024
+        }
+
+        let cacheLimit = Int(Double(totalMemory) * ratio)
         let minCache = 32 * 1024 * 1024           // 32 MB
-        let maxCache = 4 * 1024 * 1024 * 1024     // 4 GB
         return min(max(cacheLimit, minCache), maxCache)
     }
     
@@ -54,8 +75,8 @@ class LocalLLM {
             modelConfiguration = LLMRegistry.llama3_2_3B_4bit
         case MlxCommunityRepo + "/" + Qwen3_4B_4bit:
             modelConfiguration = LLMRegistry.qwen3_4b_4bit
-        case MlxCommunityRepo + "/" + Qwen3_30B_A3B_4bit:
-            modelConfiguration = LLMRegistry.qwen3MoE_30b_a3b_4bit
+        case MlxCommunityRepo + "/" + Qwen3_30B_A3B_Instruct_2507_4bit:
+            modelConfiguration = LLMRegistry.qwen3_30b_a3b_instruct_2507_4bit
         default:
             throw NSError(domain: "TextEnhancer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unsupported model"])
         }

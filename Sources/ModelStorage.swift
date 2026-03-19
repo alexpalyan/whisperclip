@@ -40,7 +40,7 @@ class ModelStorage {
              MlxCommunityRepo + "/" + Phi_3_5_mini_instruct_4bit,
              MlxCommunityRepo + "/" + Llama_3_2_3B_Instruct_4bit,
              MlxCommunityRepo + "/" + Qwen3_4B_4bit,
-             MlxCommunityRepo + "/" + Qwen3_30B_A3B_4bit:
+             MlxCommunityRepo + "/" + Qwen3_30B_A3B_Instruct_2507_4bit:
             let modelContainer = try await LocalLLM.loadModel(modelRepo: modelRepo, modelName: modelName)
             Logger.log("Model \(modelRepo)/\(modelName) loaded", log: Logger.general)
 
