@@ -37,6 +37,7 @@ struct DefaultSettings {
     static let holdToTalk = false
     static let recordingCount = 0
     static let donationDialogShown = false
+    static let selectedLLMModelName = CurrentLLMModelName
     static let prompts: [Prompt] = [
         Prompt(label: "None", content: ""),
         Prompt(label: "Translate to English", content: "Translate the following text to English:"),
@@ -71,6 +72,7 @@ class SettingsStore: ObservableObject {
         case holdToTalk = "holdToTalk"
         case recordingCount = "recordingCount"
         case donationDialogShown = "donationDialogShown"
+        case selectedLLMModelName = "selectedLLMModelName"
         case prompts = "prompts"
         case selectedPromptId = "selectedPromptId"
     }
@@ -211,6 +213,12 @@ class SettingsStore: ObservableObject {
         }
     }
 
+    @Published var selectedLLMModelName: String = DefaultSettings.selectedLLMModelName {
+        didSet {
+            defaults.set(selectedLLMModelName, forKey: Keys.selectedLLMModelName.rawValue)
+        }
+    }
+
     @Published var prompts: [Prompt] = [] {
         didSet {
             savePrompts()
@@ -271,6 +279,7 @@ class SettingsStore: ObservableObject {
         self.holdToTalk = defaults.object(forKey: Keys.holdToTalk.rawValue) == nil ? DefaultSettings.holdToTalk : defaults.bool(forKey: Keys.holdToTalk.rawValue)
         self.recordingCount = defaults.object(forKey: Keys.recordingCount.rawValue) == nil ? DefaultSettings.recordingCount : defaults.integer(forKey: Keys.recordingCount.rawValue)
         self.donationDialogShown = defaults.object(forKey: Keys.donationDialogShown.rawValue) == nil ? DefaultSettings.donationDialogShown : defaults.bool(forKey: Keys.donationDialogShown.rawValue)
+        self.selectedLLMModelName = defaults.string(forKey: Keys.selectedLLMModelName.rawValue) ?? DefaultSettings.selectedLLMModelName
         self.selectedPromptId = defaults.string(forKey: Keys.selectedPromptId.rawValue) ?? DefaultSettings.selectedPromptId
         
         // Load prompts
@@ -353,6 +362,7 @@ class SettingsStore: ObservableObject {
         meetingHotkeyModifier = DefaultSettings.meetingHotkeyModifier
         meetingHotkeyKey = DefaultSettings.meetingHotkeyKey
         holdToTalk = DefaultSettings.holdToTalk
+        selectedLLMModelName = DefaultSettings.selectedLLMModelName
         prompts = DefaultSettings.prompts
         selectedPromptId = DefaultSettings.selectedPromptId
     }

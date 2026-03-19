@@ -14,9 +14,10 @@ class LLM: LLMProtocol {
     }
 
     func load() async throws {
+        let selectedModelName = SettingsStore.shared.selectedLLMModelName
+        let newModelID = "\(CurrentLLMModelRepo)/\(selectedModelName)"
 
-        if self.modelContainer == nil {
-            let newModelID = CurrentLLMModelRepo + "/" + CurrentLLMModelName
+        if self.modelContainer == nil || self.modelID != newModelID {
             self.modelContainer = try await LocalLLM.loadModel(modelRepo: newModelID, modelName: "")
             if self.modelContainer != nil {
                 self.modelID = newModelID
@@ -73,7 +74,9 @@ class LLM: LLMProtocol {
     }
 
     func isReady() async throws -> Bool {
-        if ModelStorage.shared.modelExists(modelRepo: CurrentLLMModelRepo, modelName: CurrentLLMModelName) {
+        let selectedModelName = SettingsStore.shared.selectedLLMModelName
+        let modelID = "\(CurrentLLMModelRepo)/\(selectedModelName)"
+        if ModelStorage.shared.modelExists(modelRepo: modelID, modelName: "") {
             return true
         }
         return false

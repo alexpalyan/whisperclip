@@ -21,12 +21,13 @@ let Gemma_2_9b_it_4bit = "gemma-2-9b-it-4bit"
 let Meta_Llama_3_8B_Instruct_4bit = "Meta-Llama-3-8B-Instruct-4bit"
 let DeepSeek_R1_Distill_Qwen_7B_4bit = "DeepSeek-R1-Distill-Qwen-7B-4bit"
 let Mistral_7B_Instruct_v0_3_4bit = "Mistral-7B-Instruct-v0.3-4bit"
-let Qwen_3_8B_4bit = "Qwen-3-8B-4bit"
+let Qwen_3_8B_4bit = "Qwen3-8B-4bit"
 let Phi_3_5_mini_instruct_4bit = "Phi-3.5-mini-instruct-4bit"
 let Gemma_2_2b_it_4bit = "gemma-2-2b-it-4bit"
 let Qwen2_5_1_5B_Instruct_4bit = "Qwen2.5-1.5B-Instruct-4bit"
 let Llama_3_2_3B_Instruct_4bit = "Llama-3.2-3B-Instruct-4bit"
 let Qwen3_4B_4bit = "Qwen3-4B-4bit"
+let Qwen3_30B_A3B_4bit = "Qwen3-30B-A3B-4bit"
 
 let TextLLMModelNames = [
     Gemma_2_9b_it_4bit,
@@ -37,6 +38,9 @@ let TextLLMModelNames = [
     Phi_3_5_mini_instruct_4bit,
     Gemma_2_2b_it_4bit,
     Qwen2_5_1_5B_Instruct_4bit,
+    Llama_3_2_3B_Instruct_4bit,
+    Qwen3_4B_4bit,
+    Qwen3_30B_A3B_4bit,
 ]
 
 let WhisperClipAppDir = "/Applications/WhisperClip.app"
@@ -59,6 +63,20 @@ let CurrentSTTModelName = OpenAI_Whisper_Large_V3_V20240930_Turbo_632MB;
 
 let CurrentLLMModelRepo = MlxCommunityRepo;
 let CurrentLLMModelName = Qwen3_4B_4bit;
+
+struct LLMModelInfo: Identifiable {
+    let id: String
+    let displayName: String
+    let repoID: String
+}
+
+let LLMModels: [LLMModelInfo] = TextLLMModelNames.map { name in
+    LLMModelInfo(
+        id: name,
+        displayName: name,
+        repoID: "\(MlxCommunityRepo)/\(name)"
+    )
+}
 
 // Parakeet model constants
 let ParakeetModelRepo = "FluidInference"

@@ -45,6 +45,7 @@ struct OnboardingView: View {
     @State private var permissionRefreshTimer: Timer?
     @State private var compilationTimer: Timer?
     @State private var isCompiling: Bool = false
+    @State private var selectedLLMModelName: String = SettingsStore.shared.selectedLLMModelName
 
     private static func downloadProgressToStepProgress(downloadProgress: Double) -> Double {
         if downloadProgress > 0.8 {
@@ -236,10 +237,10 @@ struct OnboardingView: View {
             """,
             imageName: "brain.head.profile",
             buttonText: "Download",
-            source: ModelStorage.shared.getModelFilesUrl(modelID: CurrentLLMModelRepo + "/" + CurrentLLMModelName, subfolder: ""),
+            source: ModelStorage.shared.getModelFilesUrl(modelID: "\(CurrentLLMModelRepo)/\(selectedLLMModelName)", subfolder: ""),
             action: { [self] progress in
                 Task {
-                    let modelID = CurrentLLMModelRepo + "/" + CurrentLLMModelName
+                    let modelID = "\(CurrentLLMModelRepo)/\(selectedLLMModelName)"
                     do {
                         let _ = try await ModelStorage.shared.downloadModel(modelRepo: modelID, modelName: "", progress: { downloadProgress in
                             Logger.log("Downloading LLM model: \(downloadProgress)", log: Logger.general)
@@ -249,6 +250,9 @@ struct OnboardingView: View {
                         await MainActor.run { startCompilationAnimation() }
                         try await ModelStorage.shared.preLoadModel(modelRepo: modelID, modelName: "")
                         await MainActor.run { stopCompilationAnimation() }
+                        await MainActor.run {
+                            settings.selectedLLMModelName = selectedLLMModelName
+                        }
                         progress(1.0)
                     } catch {
                         Logger.log("Failed to download LLM model: \(error)", log: Logger.general, type: .error)
@@ -265,8 +269,9 @@ struct OnboardingView: View {
                 }
             },
             skipCondition: {
-                ModelStorage.shared.modelExists(modelRepo: CurrentLLMModelRepo + "/" + CurrentLLMModelName, modelName: "") &&
-                ModelStorage.shared.isModelLoaded(modelRepo: CurrentLLMModelRepo + "/" + CurrentLLMModelName, modelName: "")
+                let modelID = "\(CurrentLLMModelRepo)/\(selectedLLMModelName)"
+                return ModelStorage.shared.modelExists(modelRepo: modelID, modelName: "") &&
+                ModelStorage.shared.isModelLoaded(modelRepo: modelID, modelName: "")
             },
             progressBar: true
         ),
@@ -499,6 +504,23 @@ struct OnboardingView: View {
                             .multilineTextAlignment(.center)
                             .foregroundColor(.gray)
                             .padding(.horizontal, 20)
+
+                        if currentStep.title == "Download LLM Model (Optional)" {
+                            VStack(spacing: 6) {
+                                Text("Model")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.secondary)
+
+                                Picker("LLM Model", selection: $selectedLLMModelName) {
+                                    ForEach(TextLLMModelNames, id: \.self) { modelName in
+                                        Text(modelName).tag(modelName)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+                            .padding(.top, 8)
+                        }
                         
                         // Source URL section (only if source exists)
                         if let source = currentStep.source, !source.isEmpty {

@@ -10,6 +10,11 @@ struct SettingsView: View {
     @State private var meetingModifierRawValue: UInt = NSEvent.ModifierFlags.control.rawValue
     @State private var meetingKeyString: String = "M"
     @State private var meetingKeyCode: UInt16 = 46 // Default to M
+
+    // LLM model management state
+    @State private var llmDownloadInProgress = false
+    @State private var llmDownloadModelName: String? = nil
+    @State private var llmDownloadProgress: Double = 0
     
     // Prompt management state
     @State private var showingNewPromptDialog = false
@@ -159,6 +164,8 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 sttEngineSection
+
+                llmModelSection
                 
                 languageSection
                 
@@ -756,6 +763,87 @@ struct SettingsView: View {
         .background(Color.gray.opacity(0.2))
         .cornerRadius(8)
     }
+
+    private var llmModelSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("AI Text Model")
+                    .font(.headline)
+                    .foregroundColor(.white)
+
+                Text("Select which downloaded model to use for text enhancement. You can download additional models below.")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+
+                VStack(spacing: 10) {
+                    ForEach(LLMModels) { model in
+                        let isDownloaded = ModelStorage.shared.isLLMModelDownloaded(modelName: model.id)
+                        let isSelected = settings.selectedLLMModelName == model.id
+                        let isDownloading = llmDownloadInProgress && llmDownloadModelName == model.id
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(model.displayName)
+                                    .foregroundColor(.white)
+                                    .font(.subheadline)
+
+                                if isSelected && isDownloaded {
+                                    Text("Active")
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                } else if isSelected {
+                                    Text("Selected (not downloaded)")
+                                        .font(.caption)
+                                        .foregroundColor(.orange)
+                                } else if isDownloaded {
+                                    Text("Downloaded")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                } else {
+                                    Text("Not downloaded")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                }
+                            }
+
+                            Spacer()
+
+                            if isDownloading {
+                                ProgressView(value: llmDownloadProgress)
+                                    .progressViewStyle(.linear)
+                                    .frame(width: 120)
+                            } else if isDownloaded {
+                                if !isSelected {
+                                    Button("Select") {
+                                        settings.selectedLLMModelName = model.id
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+
+                                Button("Delete") {
+                                    deleteLLMModel(modelName: model.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .foregroundColor(.red)
+                            } else {
+                                Button("Download") {
+                                    downloadLLMModel(modelName: model.id)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(llmDownloadInProgress)
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.gray.opacity(0.2))
+                        .cornerRadius(8)
+                    }
+                }
+            }
+            .padding()
+        }
+        .background(Color.gray.opacity(0.2))
+        .cornerRadius(8)
+    }
     
     private var languageSection: some View {
         GroupBox {
@@ -903,6 +991,55 @@ struct SettingsView: View {
         settings.resetToDefaults()
         loadCurrentSettings()
         updateHotkey()
+    }
+
+    private func downloadLLMModel(modelName: String) {
+        llmDownloadInProgress = true
+        llmDownloadModelName = modelName
+        llmDownloadProgress = 0
+
+        Task {
+            let modelID = "\(CurrentLLMModelRepo)/\(modelName)"
+            do {
+                let _ = try await ModelStorage.shared.downloadModel(modelRepo: modelID, modelName: "", progress: { progress in
+                    Task { @MainActor in
+                        llmDownloadProgress = progress
+                    }
+                })
+                try await ModelStorage.shared.preLoadModel(modelRepo: modelID, modelName: "")
+                await MainActor.run {
+                    settings.selectedLLMModelName = modelName
+                    llmDownloadInProgress = false
+                    llmDownloadModelName = nil
+                    llmDownloadProgress = 0
+                    refreshModelsSize()
+                }
+            } catch {
+                Logger.log("Failed to download LLM model: \(error)", log: Logger.general, type: .error)
+                await MainActor.run {
+                    llmDownloadInProgress = false
+                    llmDownloadModelName = nil
+                    llmDownloadProgress = 0
+                }
+            }
+        }
+    }
+
+    private func deleteLLMModel(modelName: String) {
+        let modelID = "\(CurrentLLMModelRepo)/\(modelName)"
+        do {
+            try ModelStorage.shared.deleteModel(modelRepo: modelID, modelName: "")
+            Logger.log("Deleted LLM model: \(modelName)", log: Logger.general)
+        } catch {
+            Logger.log("Failed to delete LLM model: \(error)", log: Logger.general, type: .error)
+        }
+
+        if settings.selectedLLMModelName == modelName {
+            let fallback = ModelStorage.shared.getDownloadedLLMModelNames().first(where: { $0 != modelName }) ?? CurrentLLMModelName
+            settings.selectedLLMModelName = fallback
+        }
+
+        refreshModelsSize()
     }
     
     // MARK: - Model Management

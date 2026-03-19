@@ -54,6 +54,8 @@ class LocalLLM {
             modelConfiguration = LLMRegistry.llama3_2_3B_4bit
         case MlxCommunityRepo + "/" + Qwen3_4B_4bit:
             modelConfiguration = LLMRegistry.qwen3_4b_4bit
+        case MlxCommunityRepo + "/" + Qwen3_30B_A3B_4bit:
+            modelConfiguration = LLMRegistry.qwen3MoE_30b_a3b_4bit
         default:
             throw NSError(domain: "TextEnhancer", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unsupported model"])
         }

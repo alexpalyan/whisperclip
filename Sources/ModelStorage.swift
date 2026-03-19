@@ -39,7 +39,8 @@ class ModelStorage {
              MlxCommunityRepo + "/" + Qwen2_5_1_5B_Instruct_4bit,
              MlxCommunityRepo + "/" + Phi_3_5_mini_instruct_4bit,
              MlxCommunityRepo + "/" + Llama_3_2_3B_Instruct_4bit,
-             MlxCommunityRepo + "/" + Qwen3_4B_4bit:
+             MlxCommunityRepo + "/" + Qwen3_4B_4bit,
+             MlxCommunityRepo + "/" + Qwen3_30B_A3B_4bit:
             let modelContainer = try await LocalLLM.loadModel(modelRepo: modelRepo, modelName: modelName)
             Logger.log("Model \(modelRepo)/\(modelName) loaded", log: Logger.general)
 
@@ -157,6 +158,18 @@ class ModelStorage {
             return false
         }
         return true
+    }
+
+    func getDownloadedLLMModelNames() -> [String] {
+        return TextLLMModelNames.filter { modelName in
+            let modelID = "\(MlxCommunityRepo)/\(modelName)"
+            return modelExists(modelRepo: modelID, modelName: "")
+        }
+    }
+
+    func isLLMModelDownloaded(modelName: String) -> Bool {
+        let modelID = "\(MlxCommunityRepo)/\(modelName)"
+        return modelExists(modelRepo: modelID, modelName: "")
     }
 
     func getModelSize(modelRepo: String, modelName: String) -> Int64 {
