@@ -50,10 +50,10 @@ class MeetingAI {
     // MARK: - Individual Generation Methods
     
     private func generateBriefSummary(transcript: String) async throws -> String {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Provide a 1-2 sentence summary of the meeting that captures the main purpose and outcome.
         Be concise and focus on the most important point. Do not include any preamble or explanation.
-        """
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -67,11 +67,12 @@ class MeetingAI {
     }
     
     private func generateDetailedSummary(transcript: String) async throws -> String {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Provide a comprehensive summary of the meeting in 3-5 paragraphs.
         Include the main topics discussed, key points made by participants, and any conclusions reached.
         Do not include any preamble or explanation, just the summary.
-        """
+        Do not output transcript excerpts, timestamps, or speaker labels.
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -85,12 +86,12 @@ class MeetingAI {
     }
     
     private func extractActionItems(transcript: String) async throws -> [ActionItem] {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Extract action items from the meeting transcript.
         List each action item on a new line, starting with "- ".
         Include the assignee in parentheses if mentioned. Example: "- Complete the report (John)"
         Only output action items, nothing else. If there are no action items, output "NONE".
-        """
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -104,11 +105,11 @@ class MeetingAI {
     }
     
     private func extractDecisions(transcript: String) async throws -> [String] {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Extract key decisions made during the meeting.
         List each decision on a new line, starting with "- ".
         Only output decisions, nothing else. If there are no clear decisions, output "NONE".
-        """
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -122,11 +123,11 @@ class MeetingAI {
     }
     
     private func extractFollowUps(transcript: String) async throws -> [String] {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Identify items that need follow-up after this meeting.
         List each follow-up item on a new line, starting with "- ".
         Only output follow-up items, nothing else. If there are none, output "NONE".
-        """
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -140,14 +141,14 @@ class MeetingAI {
     }
     
     private func extractTopics(transcript: String) async throws -> [MeetingTopic] {
-        let systemPrompt = """
+        let systemPrompt = summarySystemPrompt("""
         You are a meeting assistant. Identify the main topics discussed in the meeting.
         For each topic, provide:
         TOPIC: [topic title]
         SUMMARY: [1-2 sentence summary of the discussion on this topic]
         
         List up to 5 main topics. Do not include any preamble.
-        """
+        """)
         
         let userPrompt = """
         Meeting Transcript:
@@ -389,6 +390,89 @@ class MeetingAI {
         }
         
         return cleaned
+    }
+
+    private func summarySystemPrompt(_ basePrompt: String) -> String {
+        let languageInstruction = summaryLanguageInstruction()
+        let transcriptInstruction = summaryTranscriptInstruction()
+        let instructions = [languageInstruction, transcriptInstruction]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        if instructions.isEmpty {
+            return basePrompt
+        }
+        return "\(basePrompt)\n\n\(instructions)"
+    }
+
+    private func summaryLanguageInstruction() -> String {
+        let settings = SettingsStore.shared
+        let summaryLanguage = settings.meetingSummaryLanguage
+        let transcriptLanguage = settings.language
+
+        if summaryLanguage == "auto" {
+            if transcriptLanguage == "auto" {
+                return "Detect the transcript language and write the output in the same language. Do not translate to English unless the transcript is in English."
+            }
+            return "Write the output in \(languageName(for: transcriptLanguage)). Do not translate to English unless the transcript is in English."
+        }
+
+        var instruction = ""
+        if transcriptLanguage != "auto" {
+            instruction = "The transcript language is \(languageName(for: transcriptLanguage)). "
+        }
+        instruction += "Write the output in \(languageName(for: summaryLanguage))."
+        return instruction
+    }
+
+    private func summaryTranscriptInstruction() -> String {
+        return "Use the transcript only as source material for the summary. If it contains obvious speech recognition errors or phonetic misspellings, correct them silently while preserving the original meaning. Do not invent details or output the transcript."
+    }
+
+    private func languageName(for code: String) -> String {
+        switch code {
+        case "en":
+            return "English"
+        case "uk":
+            return "Ukrainian"
+        case "es":
+            return "Spanish"
+        case "fr":
+            return "French"
+        case "de":
+            return "German"
+        case "it":
+            return "Italian"
+        case "pt":
+            return "Portuguese"
+        case "ru":
+            return "Russian"
+        case "ja":
+            return "Japanese"
+        case "ko":
+            return "Korean"
+        case "zh":
+            return "Chinese"
+        case "ar":
+            return "Arabic"
+        case "hi":
+            return "Hindi"
+        case "tr":
+            return "Turkish"
+        case "pl":
+            return "Polish"
+        case "nl":
+            return "Dutch"
+        case "sv":
+            return "Swedish"
+        case "da":
+            return "Danish"
+        case "no":
+            return "Norwegian"
+        case "fi":
+            return "Finnish"
+        default:
+            return "the selected language"
+        }
     }
     
     private func formatDate(_ date: Date) -> String {

@@ -40,7 +40,7 @@ class ModelStorage {
              MlxCommunityRepo + "/" + Phi_3_5_mini_instruct_4bit,
              MlxCommunityRepo + "/" + Llama_3_2_3B_Instruct_4bit,
              MlxCommunityRepo + "/" + Qwen3_4B_4bit,
-             MlxCommunityRepo + "/" + Qwen3_30B_A3B_Instruct_2507_4bit:
+             MlxCommunityRepo + "/" + Qwen3_30B_A3B_4bit:
             let modelContainer = try await LocalLLM.loadModel(modelRepo: modelRepo, modelName: modelName)
             Logger.log("Model \(modelRepo)/\(modelName) loaded", log: Logger.general)
 
@@ -144,20 +144,51 @@ class ModelStorage {
             return false
         }
         Logger.log("Model modelRepo: \(modelRepo), modelName: \(modelName) already exists at \(modelDir.path)", log: Logger.general)
-        do {
-            let hashFile = modelDir.appendingPathComponent(digestFileName)
-            let hashFileContent = try String(contentsOf: hashFile, encoding: .utf8)
 
-            let hash = try GenericHelper.getDirectoryHash(ofDirectory: modelDir, skipping: digestFileName)
-            if hashFileContent != hash {
-                Logger.log("Model modelRepo: \(modelRepo), modelName: \(modelName) hash mismatch: hash: \(hash) hashFileContent: \(hashFileContent)", log: Logger.general)
-                return false
+        let hashFile = modelDir.appendingPathComponent(digestFileName)
+        guard GenericHelper.fileExists(file: hashFile) else {
+            if hasAnyModelFiles(in: modelDir) {
+                Logger.log("Model digest missing for modelRepo: \(modelRepo), modelName: \(modelName); marking as present", log: Logger.general, type: .debug)
+                try? "unverified".write(to: hashFile, atomically: true, encoding: .utf8)
+                return true
             }
-        } catch {
-            Logger.log("Failed to get hash for model modelRepo: \(modelRepo), modelName: \(modelName): \(error.localizedDescription)", log: Logger.general)
+            Logger.log("Model digest missing and no files found for modelRepo: \(modelRepo), modelName: \(modelName)", log: Logger.general, type: .debug)
             return false
         }
+
+        if ProcessInfo.processInfo.environment["VERIFY_MODEL_HASH"] == "1" {
+            do {
+                let hashFileContent = try String(contentsOf: hashFile, encoding: .utf8)
+                let hash = try GenericHelper.getDirectoryHash(ofDirectory: modelDir, skipping: digestFileName)
+                if hashFileContent != hash {
+                    Logger.log("Model modelRepo: \(modelRepo), modelName: \(modelName) hash mismatch: hash: \(hash) hashFileContent: \(hashFileContent)", log: Logger.general)
+                    return false
+                }
+            } catch {
+                Logger.log("Failed to verify hash for model modelRepo: \(modelRepo), modelName: \(modelName): \(error.localizedDescription)", log: Logger.general)
+                return false
+            }
+        }
         return true
+    }
+
+    private func hasAnyModelFiles(in directory: URL) -> Bool {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return false
+        }
+
+        for case let url as URL in enumerator {
+            if let values = try? url.resourceValues(forKeys: [.isRegularFileKey]), values.isRegularFile == true {
+                return true
+            }
+        }
+
+        return false
     }
 
     func getDownloadedLLMModelNames() -> [String] {

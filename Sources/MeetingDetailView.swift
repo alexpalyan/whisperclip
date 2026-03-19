@@ -10,7 +10,9 @@ struct MeetingDetailView: View {
     @State private var questionText = ""
     @State private var isAskingQuestion = false
     @State private var qaError: String?
-    @State private var isRegenerating = false
+    private var isRegenerating: Bool {
+        currentMeeting.status == .processing
+    }
     @State private var showCopiedToast = false
     
     /// Always read the latest meeting data from storage (reactive to @Published changes)
@@ -285,31 +287,7 @@ struct MeetingDetailView: View {
                     title: "No Summary Yet",
                     message: "AI summary will appear here once the meeting is processed"
                 )
-                
-                if currentMeeting.status == .completed && !currentMeeting.segments.isEmpty {
-                    Button {
-                        regenerateSummary()
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isRegenerating {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "sparkles")
-                            }
-                            Text(isRegenerating ? "Generating..." : "Generate Summary")
-                        }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .background(Color.teal)
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isRegenerating)
-                }
+                summaryActionButton
             } else {
                 // Brief summary
                 summarySection(title: "Overview", icon: "doc.text.fill") {
@@ -352,6 +330,8 @@ struct MeetingDetailView: View {
                     }
                 }
                 
+                summaryActionButton
+                
                 // Decisions
                 if !currentMeeting.summary.decisions.isEmpty {
                     summarySection(title: "Decisions Made", icon: "arrow.triangle.branch") {
@@ -391,6 +371,39 @@ struct MeetingDetailView: View {
                 }
             }
         }
+    }
+
+    private var summaryActionButton: some View {
+        Group {
+            if !currentMeeting.segments.isEmpty && (currentMeeting.status == .completed || currentMeeting.status == .processing) {
+                Button {
+                    regenerateSummary()
+                } label: {
+                    HStack(spacing: 8) {
+                        if isRegenerating {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "sparkles")
+                        }
+                        Text(isRegenerating ? "Generating..." : summaryActionLabel)
+                    }
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.teal)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .disabled(isRegenerating)
+            }
+        }
+    }
+
+    private var summaryActionLabel: String {
+        currentMeeting.summary.isEmpty ? "Generate Summary" : "Regenerate Summary"
     }
     
     private func summarySection<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
@@ -620,21 +633,22 @@ struct MeetingDetailView: View {
     }
     
     private func regenerateSummary() {
-        isRegenerating = true
         let meetingId = meeting.id
-        
+
+        storage.updateStatus(.processing, for: meetingId)
+
         Task {
             do {
                 let summary = try await MeetingAI.shared.generateSummary(from: currentMeeting)
-                
+
                 await MainActor.run {
                     storage.updateSummary(summary, for: meetingId)
                     // currentMeeting is computed from storage — auto-updates
-                    isRegenerating = false
                 }
             } catch {
+                Logger.log("Failed to regenerate summary for meeting \(meetingId): \(error)", log: Logger.general, type: .error)
                 await MainActor.run {
-                    isRegenerating = false
+                    storage.updateStatus(.completed, for: meetingId)
                 }
             }
         }

@@ -27,7 +27,7 @@ let Gemma_2_2b_it_4bit = "gemma-2-2b-it-4bit"
 let Qwen2_5_1_5B_Instruct_4bit = "Qwen2.5-1.5B-Instruct-4bit"
 let Llama_3_2_3B_Instruct_4bit = "Llama-3.2-3B-Instruct-4bit"
 let Qwen3_4B_4bit = "Qwen3-4B-4bit"
-let Qwen3_30B_A3B_Instruct_2507_4bit = "Qwen3-30B-A3B-Instruct-2507-4bit"
+let Qwen3_30B_A3B_4bit = "Qwen3-30B-A3B-4bit"
 
 let TextLLMModelNames = [
     Gemma_2_9b_it_4bit,
@@ -40,7 +40,7 @@ let TextLLMModelNames = [
     Qwen2_5_1_5B_Instruct_4bit,
     Llama_3_2_3B_Instruct_4bit,
     Qwen3_4B_4bit,
-    Qwen3_30B_A3B_Instruct_2507_4bit,
+    Qwen3_30B_A3B_4bit,
 ]
 
 let WhisperClipAppDir = "/Applications/WhisperClip.app"

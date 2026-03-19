@@ -30,6 +30,7 @@ struct DefaultSettings {
     static let meetingAutoStop = true
     static let meetingAutoStopDelay: Double = 5.0
     static let meetingAutoSummary = true
+    static let meetingSummaryLanguage = "auto"
     static let meetingDetectedApps: [String] = MeetingSource.allCases.filter { $0 != .manual && $0 != .unknown }.map { $0.rawValue }
     static let meetingHotkeyEnabled = false
     static let meetingHotkeyModifier = NSEvent.ModifierFlags.control
@@ -65,6 +66,7 @@ class SettingsStore: ObservableObject {
         case meetingAutoStop = "meetingAutoStop"
         case meetingAutoStopDelay = "meetingAutoStopDelay"
         case meetingAutoSummary = "meetingAutoSummary"
+        case meetingSummaryLanguage = "meetingSummaryLanguage"
         case meetingDetectedApps = "meetingDetectedApps"
         case meetingHotkeyEnabled = "meetingHotkeyEnabled"
         case meetingHotkeyModifier = "meetingHotkeyModifier"
@@ -168,6 +170,12 @@ class SettingsStore: ObservableObject {
             defaults.set(meetingAutoSummary, forKey: Keys.meetingAutoSummary.rawValue)
         }
     }
+
+    @Published var meetingSummaryLanguage: String = DefaultSettings.meetingSummaryLanguage {
+        didSet {
+            defaults.set(meetingSummaryLanguage, forKey: Keys.meetingSummaryLanguage.rawValue)
+        }
+    }
     
     @Published var meetingDetectedApps: [String] = DefaultSettings.meetingDetectedApps {
         didSet {
@@ -267,6 +275,7 @@ class SettingsStore: ObservableObject {
         self.meetingAutoStop = defaults.object(forKey: Keys.meetingAutoStop.rawValue) == nil ? DefaultSettings.meetingAutoStop : defaults.bool(forKey: Keys.meetingAutoStop.rawValue)
         self.meetingAutoStopDelay = defaults.object(forKey: Keys.meetingAutoStopDelay.rawValue) == nil ? DefaultSettings.meetingAutoStopDelay : defaults.double(forKey: Keys.meetingAutoStopDelay.rawValue)
         self.meetingAutoSummary = defaults.object(forKey: Keys.meetingAutoSummary.rawValue) == nil ? DefaultSettings.meetingAutoSummary : defaults.bool(forKey: Keys.meetingAutoSummary.rawValue)
+        self.meetingSummaryLanguage = defaults.string(forKey: Keys.meetingSummaryLanguage.rawValue) ?? DefaultSettings.meetingSummaryLanguage
         if let appsData = defaults.data(forKey: Keys.meetingDetectedApps.rawValue),
            let decodedApps = try? JSONDecoder().decode([String].self, from: appsData) {
             self.meetingDetectedApps = decodedApps
@@ -281,6 +290,8 @@ class SettingsStore: ObservableObject {
         self.donationDialogShown = defaults.object(forKey: Keys.donationDialogShown.rawValue) == nil ? DefaultSettings.donationDialogShown : defaults.bool(forKey: Keys.donationDialogShown.rawValue)
         self.selectedLLMModelName = defaults.string(forKey: Keys.selectedLLMModelName.rawValue) ?? DefaultSettings.selectedLLMModelName
         self.selectedPromptId = defaults.string(forKey: Keys.selectedPromptId.rawValue) ?? DefaultSettings.selectedPromptId
+
+        normalizeSelectedLLMModelNameIfNeeded()
         
         // Load prompts
         if let promptsData = defaults.data(forKey: Keys.prompts.rawValue),
@@ -288,6 +299,21 @@ class SettingsStore: ObservableObject {
             self.prompts = decodedPrompts
         } else {
             self.prompts = DefaultSettings.prompts
+        }
+    }
+
+    private func normalizeSelectedLLMModelNameIfNeeded() {
+        guard !TextLLMModelNames.contains(selectedLLMModelName) else { return }
+
+        let migrationMap: [String: String] = [
+            "Qwen3-30B-A3B-Instruct-2507-4bit": Qwen3_30B_A3B_4bit,
+            "Qwen-3-8B-4bit": Qwen_3_8B_4bit,
+        ]
+
+        if let migrated = migrationMap[selectedLLMModelName] {
+            selectedLLMModelName = migrated
+        } else {
+            selectedLLMModelName = DefaultSettings.selectedLLMModelName
         }
     }
     
@@ -357,6 +383,7 @@ class SettingsStore: ObservableObject {
         meetingAutoStop = DefaultSettings.meetingAutoStop
         meetingAutoStopDelay = DefaultSettings.meetingAutoStopDelay
         meetingAutoSummary = DefaultSettings.meetingAutoSummary
+        meetingSummaryLanguage = DefaultSettings.meetingSummaryLanguage
         meetingDetectedApps = DefaultSettings.meetingDetectedApps
         meetingHotkeyEnabled = DefaultSettings.meetingHotkeyEnabled
         meetingHotkeyModifier = DefaultSettings.meetingHotkeyModifier

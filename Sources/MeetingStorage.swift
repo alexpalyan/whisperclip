@@ -82,6 +82,18 @@ class MeetingStorage: ObservableObject {
             NotificationCenter.default.post(name: .meetingSummaryGenerated, object: meetings[index])
         }
     }
+
+    func updateStatus(_ status: MeetingStatus, for meetingId: UUID) {
+        if let index = meetings.firstIndex(where: { $0.id == meetingId }) {
+            meetings[index].status = status
+
+            if currentMeeting?.id == meetingId {
+                currentMeeting = meetings[index]
+            }
+
+            saveMeetings()
+        }
+    }
     
     func addQA(_ qa: MeetingQA, to meetingId: UUID) {
         if let index = meetings.firstIndex(where: { $0.id == meetingId }) {
@@ -169,9 +181,31 @@ class MeetingStorage: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
             meetings = try JSONDecoder().decode([MeetingNote].self, from: data)
+            recoverInterruptedMeetingsIfNeeded()
             Logger.log("Loaded \(meetings.count) meetings", log: Logger.general)
         } catch {
             Logger.log("Failed to load meetings: \(error)", log: Logger.general, type: .error)
+        }
+    }
+
+    private func recoverInterruptedMeetingsIfNeeded() {
+        var hasChanges = false
+        for index in meetings.indices {
+            switch meetings[index].status {
+            case .inProgress, .processing:
+                meetings[index].status = .completed
+                if meetings[index].endedAt == nil {
+                    meetings[index].endedAt = Date()
+                }
+                hasChanges = true
+            default:
+                break
+            }
+        }
+
+        if hasChanges {
+            Logger.log("Recovered interrupted meetings after app restart", log: Logger.general)
+            saveMeetings()
         }
     }
     

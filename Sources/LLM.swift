@@ -76,9 +76,12 @@ class LLM: LLMProtocol {
     func isReady() async throws -> Bool {
         let selectedModelName = SettingsStore.shared.selectedLLMModelName
         let modelID = "\(CurrentLLMModelRepo)/\(selectedModelName)"
-        if ModelStorage.shared.modelExists(modelRepo: modelID, modelName: "") {
-            return true
+        let exists = ModelStorage.shared.modelExists(modelRepo: modelID, modelName: "")
+        if !exists {
+            let modelDir = ModelStorage.shared.getModelDir(modelRepo: modelID, modelName: "")
+            let folderExists = GenericHelper.folderExists(folder: modelDir)
+            Logger.log("LLM not ready for modelID: \(modelID). folderExists=\(folderExists)", log: Logger.general, type: .debug)
         }
-        return false
+        return exists
     }
 }

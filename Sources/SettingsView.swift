@@ -4,6 +4,7 @@ import Cocoa
 struct SettingsView: View {
     @StateObject private var settings = SettingsStore.shared
     @State private var selectedLanguage: String = "auto"
+    @State private var selectedSummaryLanguage: String = "auto"
     @State private var selectedModifierRawValue: UInt = NSEvent.ModifierFlags.command.rawValue
     @State private var hotkeyKeyString: String = "Space"
     @State private var selectedKeyCode: UInt16 = 49 // Default to Space
@@ -35,6 +36,7 @@ struct SettingsView: View {
     private let languageOptions = [
         ("auto", "Auto Detect"),
         ("en", "English"),
+        ("uk", "Ukrainian"),
         ("es", "Spanish"),
         ("fr", "French"),
         ("de", "German"),
@@ -53,6 +55,12 @@ struct SettingsView: View {
         ("da", "Danish"),
         ("no", "Norwegian"),
         ("fi", "Finnish")
+    ]
+
+    private let summaryLanguageOptions = [
+        ("auto", "Match Transcript"),
+        ("en", "English"),
+        ("uk", "Ukrainian")
     ]
     
     // Modifier key options using raw values
@@ -148,6 +156,9 @@ struct SettingsView: View {
         }
         .onChange(of: settings.language) { _, newValue in
             selectedLanguage = newValue
+        }
+        .onChange(of: settings.meetingSummaryLanguage) { _, newValue in
+            selectedSummaryLanguage = newValue
         }
         .onChange(of: settings.hotkeyModifier) { _, newValue in
             selectedModifierRawValue = newValue.rawValue
@@ -545,6 +556,29 @@ struct SettingsView: View {
                         Text("Automatically generate an AI summary, action items, and decisions when a meeting ends. Requires a downloaded AI model.")
                             .font(.caption)
                             .foregroundColor(.gray)
+
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Summary Language")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(.white)
+
+                            Picker("Summary Language", selection: $selectedSummaryLanguage) {
+                                ForEach(summaryLanguageOptions, id: \.0) { option in
+                                    Text(option.1).tag(option.0)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .onChange(of: selectedSummaryLanguage) { _, newValue in
+                                settings.meetingSummaryLanguage = newValue
+                            }
+
+                            Text("Choose the language for AI summaries. Match Transcript will keep the output in the meeting's language.")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                     .padding()
                 }
@@ -881,6 +915,7 @@ struct SettingsView: View {
     
     private func loadCurrentSettings() {
         selectedLanguage = settings.language
+        selectedSummaryLanguage = settings.meetingSummaryLanguage
         selectedModifierRawValue = settings.hotkeyModifier.rawValue
         selectedKeyCode = settings.hotkeyKey
         hotkeyKeyString = keyCodeToString(settings.hotkeyKey)
