@@ -72,7 +72,7 @@ struct PromptsSettingsView: View {
                                         onEdit: { vm.startEditing(prompt) },
                                         onSave: { vm.savePromptEdits(prompt.id) },
                                         onCancel: { vm.cancelEditing() },
-                                        onDelete: { settings.deletePrompt(id: prompt.id) }
+                                        onDelete: { vm.deletePrompt(prompt.id) }
                                     )
                                 }
                             }

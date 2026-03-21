@@ -52,4 +52,8 @@ class PromptManagementViewModel: ObservableObject {
         editingPromptLabel = ""
         editingPromptContent = ""
     }
+
+    func deletePrompt(_ promptId: String) {
+        store.deletePrompt(id: promptId)
+    }
 }
