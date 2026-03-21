@@ -1,18 +1,7 @@
+import Foundation
 import Cocoa
 import SwiftUI
-import Foundation
-
-struct Prompt: Codable, Identifiable {
-    let id: String
-    var label: String
-    var content: String
-    
-    init(label: String, content: String) {
-        self.id = UUID().uuidString
-        self.label = label
-        self.content = content
-    }
-}
+import SwiftData
 
 struct DefaultSettings {
     static let hasCompletedOnboarding = false
@@ -39,16 +28,24 @@ struct DefaultSettings {
     static let recordingCount = 0
     static let donationDialogShown = false
     static let selectedLLMModelName = CurrentLLMModelName
-    static let prompts: [Prompt] = [
-        Prompt(label: "None", content: ""),
-        Prompt(label: "Translate to English", content: "Translate the following text to English:"),
-        Prompt(label: "Grammar Fix & Email", content: "Fix the grammar and format this as a professional email:")
-    ]
-    static var selectedPromptId: String? { prompts.first?.id }
+    static var prompts: [Prompt] {
+        [
+            Prompt(label: "None", content: ""),
+            Prompt(label: "Translate to English", content: "Translate the following text to English:"),
+            Prompt(label: "Grammar Fix & Email", content: "Fix the grammar and format this as a professional email:")
+        ]
+    }
+}
+
+private struct LegacyPrompt: Codable {
+    let id: String
+    var label: String
+    var content: String
 }
 
 class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
+
     // UserDefaults keys
     private enum Keys: String {
         case hasCompletedOnboarding = "hasCompletedOnboarding"
@@ -80,31 +77,33 @@ class SettingsStore: ObservableObject {
     }
 
     private let defaults = UserDefaults.standard
+    private let modelContainer: ModelContainer
+    private let modelContext: ModelContext
 
     @Published var hasCompletedOnboarding: Bool = false {
         didSet {
             defaults.set(hasCompletedOnboarding, forKey: Keys.hasCompletedOnboarding.rawValue)
         }
     }
-    
+
     @Published var language: String = "auto" {
         didSet {
             defaults.set(language, forKey: Keys.language.rawValue)
         }
     }
-    
+
     @Published var sttEngine: STTEngine = DefaultSettings.sttEngine {
         didSet {
             defaults.set(sttEngine.rawValue, forKey: Keys.sttEngine.rawValue)
         }
     }
-    
+
     @Published var autoEnter: Bool = DefaultSettings.autoEnter {
         didSet {
             defaults.set(autoEnter, forKey: Keys.autoEnter.rawValue)
         }
     }
-    
+
     @Published var startMinimized: Bool = DefaultSettings.startMinimized {
         didSet {
             defaults.set(startMinimized, forKey: Keys.startMinimized.rawValue)
@@ -128,13 +127,13 @@ class SettingsStore: ObservableObject {
             defaults.set(hotkeyEnabled, forKey: Keys.hotkeyEnabled.rawValue)
         }
     }
-    
+
     @Published var hotkeyModifier: NSEvent.ModifierFlags = DefaultSettings.hotkeyModifier {
         didSet {
             defaults.set(hotkeyModifier.rawValue, forKey: Keys.hotkeyModifier.rawValue)
         }
     }
-    
+
     @Published var hotkeyKey: UInt16 = DefaultSettings.hotkeyKey {
         didSet {
             defaults.set(hotkeyKey, forKey: Keys.hotkeyKey.rawValue)
@@ -146,25 +145,25 @@ class SettingsStore: ObservableObject {
             defaults.set(meetingAutoDetect, forKey: Keys.meetingAutoDetect.rawValue)
         }
     }
-    
+
     @Published var meetingAutoStart: Bool = DefaultSettings.meetingAutoStart {
         didSet {
             defaults.set(meetingAutoStart, forKey: Keys.meetingAutoStart.rawValue)
         }
     }
-    
+
     @Published var meetingAutoStop: Bool = DefaultSettings.meetingAutoStop {
         didSet {
             defaults.set(meetingAutoStop, forKey: Keys.meetingAutoStop.rawValue)
         }
     }
-    
+
     @Published var meetingAutoStopDelay: Double = DefaultSettings.meetingAutoStopDelay {
         didSet {
             defaults.set(meetingAutoStopDelay, forKey: Keys.meetingAutoStopDelay.rawValue)
         }
     }
-    
+
     @Published var meetingAutoSummary: Bool = DefaultSettings.meetingAutoSummary {
         didSet {
             defaults.set(meetingAutoSummary, forKey: Keys.meetingAutoSummary.rawValue)
@@ -176,7 +175,7 @@ class SettingsStore: ObservableObject {
             defaults.set(meetingSummaryLanguage, forKey: Keys.meetingSummaryLanguage.rawValue)
         }
     }
-    
+
     @Published var meetingDetectedApps: [String] = DefaultSettings.meetingDetectedApps {
         didSet {
             if let encoded = try? JSONEncoder().encode(meetingDetectedApps) {
@@ -184,19 +183,19 @@ class SettingsStore: ObservableObject {
             }
         }
     }
-    
+
     @Published var meetingHotkeyEnabled: Bool = DefaultSettings.meetingHotkeyEnabled {
         didSet {
             defaults.set(meetingHotkeyEnabled, forKey: Keys.meetingHotkeyEnabled.rawValue)
         }
     }
-    
+
     @Published var meetingHotkeyModifier: NSEvent.ModifierFlags = DefaultSettings.meetingHotkeyModifier {
         didSet {
             defaults.set(meetingHotkeyModifier.rawValue, forKey: Keys.meetingHotkeyModifier.rawValue)
         }
     }
-    
+
     @Published var meetingHotkeyKey: UInt16 = DefaultSettings.meetingHotkeyKey {
         didSet {
             defaults.set(meetingHotkeyKey, forKey: Keys.meetingHotkeyKey.rawValue)
@@ -227,18 +226,14 @@ class SettingsStore: ObservableObject {
         }
     }
 
-    @Published var prompts: [Prompt] = [] {
-        didSet {
-            savePrompts()
-        }
-    }
-    
+    @Published var prompts: [Prompt] = []
+
     @Published var selectedPromptId: String? = nil {
         didSet {
             defaults.set(selectedPromptId, forKey: Keys.selectedPromptId.rawValue)
         }
     }
-    
+
     // Computed property to get the current prompt content
     var currentPrompt: String {
         guard let selectedId = selectedPromptId,
@@ -248,10 +243,13 @@ class SettingsStore: ObservableObject {
         return prompt.content
     }
 
-    private init() {
+    private init(container: ModelContainer? = nil) {
+        let resolvedContainer = container ?? SettingsDataContainer.create()
+        self.modelContainer = resolvedContainer
+        self.modelContext = ModelContext(resolvedContainer)
         loadSettings()
     }
-    
+
     private func loadSettings() {
         // Load values from UserDefaults with default values
         // Note: Property observers are temporarily disabled during init
@@ -289,16 +287,72 @@ class SettingsStore: ObservableObject {
         self.recordingCount = defaults.object(forKey: Keys.recordingCount.rawValue) == nil ? DefaultSettings.recordingCount : defaults.integer(forKey: Keys.recordingCount.rawValue)
         self.donationDialogShown = defaults.object(forKey: Keys.donationDialogShown.rawValue) == nil ? DefaultSettings.donationDialogShown : defaults.bool(forKey: Keys.donationDialogShown.rawValue)
         self.selectedLLMModelName = defaults.string(forKey: Keys.selectedLLMModelName.rawValue) ?? DefaultSettings.selectedLLMModelName
-        self.selectedPromptId = defaults.string(forKey: Keys.selectedPromptId.rawValue) ?? DefaultSettings.selectedPromptId
+        self.selectedPromptId = defaults.string(forKey: Keys.selectedPromptId.rawValue)
 
         normalizeSelectedLLMModelNameIfNeeded()
-        
-        // Load prompts
-        if let promptsData = defaults.data(forKey: Keys.prompts.rawValue),
-           let decodedPrompts = try? JSONDecoder().decode([Prompt].self, from: promptsData) {
-            self.prompts = decodedPrompts
-        } else {
-            self.prompts = DefaultSettings.prompts
+
+        migratePromptsFromUserDefaults()
+        fetchPrompts()
+
+        if self.prompts.isEmpty {
+            seedDefaultPrompts()
+            fetchPrompts()
+        }
+
+        if selectedPromptId == nil || !prompts.contains(where: { $0.id == selectedPromptId }) {
+            selectedPromptId = prompts.first?.id
+        }
+    }
+
+    private func fetchPrompts() {
+        let descriptor = FetchDescriptor<Prompt>(sortBy: [SortDescriptor(\Prompt.createdAt)])
+        do {
+            self.prompts = try modelContext.fetch(descriptor)
+        } catch {
+            Logger.log("Failed to fetch prompts: \(error)", log: Logger.settings, type: .error)
+            self.prompts = []
+        }
+    }
+
+    private func migratePromptsFromUserDefaults() {
+        guard !defaults.bool(forKey: "did_migrate_to_swiftdata") else { return }
+
+        guard let promptsData = defaults.data(forKey: Keys.prompts.rawValue),
+              let legacyPrompts = try? JSONDecoder().decode([LegacyPrompt].self, from: promptsData) else {
+            seedDefaultPrompts()
+            defaults.set(true, forKey: "did_migrate_to_swiftdata")
+            return
+        }
+
+        let migrationDate = Date()
+        for (index, legacy) in legacyPrompts.enumerated() {
+            let prompt = Prompt(
+                id: legacy.id,
+                label: legacy.label,
+                content: legacy.content,
+                createdAt: migrationDate.addingTimeInterval(Double(index))
+            )
+            modelContext.insert(prompt)
+        }
+
+        do {
+            try modelContext.save()
+            defaults.set(promptsData, forKey: "prompts_backup_pre_swiftdata")
+            defaults.removeObject(forKey: Keys.prompts.rawValue)
+            defaults.set(true, forKey: "did_migrate_to_swiftdata")
+        } catch {
+            Logger.log("Migration failed: \(error)", log: Logger.settings, type: .error)
+        }
+    }
+
+    private func seedDefaultPrompts() {
+        for prompt in DefaultSettings.prompts {
+            modelContext.insert(prompt)
+        }
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.log("Failed to seed default prompts: \(error)", log: Logger.settings, type: .error)
         }
     }
 
@@ -316,55 +370,69 @@ class SettingsStore: ObservableObject {
             selectedLLMModelName = DefaultSettings.selectedLLMModelName
         }
     }
-    
-    private func savePrompts() {
-        if let encoded = try? JSONEncoder().encode(prompts) {
-            defaults.set(encoded, forKey: Keys.prompts.rawValue)
-        }
-    }
-    
+
     // MARK: - Prompt Management
-    
+
     func createPrompt(label: String, content: String = "") -> Prompt {
         let newPrompt = Prompt(label: label, content: content)
-        prompts.append(newPrompt)
-        
+        modelContext.insert(newPrompt)
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.log("Failed to create prompt: \(error)", log: Logger.settings, type: .error)
+        }
+        fetchPrompts()
+
         // If this is the first prompt or no prompt is selected, select this one
         if selectedPromptId == nil || prompts.count == 1 {
             selectedPromptId = newPrompt.id
         }
-        
+
         return newPrompt
     }
-    
+
     func updatePrompt(id: String, label: String? = nil, content: String? = nil) {
-        guard let index = prompts.firstIndex(where: { $0.id == id }) else { return }
-        
+        guard let prompt = prompts.first(where: { $0.id == id }) else { return }
+
         if let label = label {
-            prompts[index].label = label
+            prompt.label = label
         }
         if let content = content {
-            prompts[index].content = content
+            prompt.content = content
         }
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.log("Failed to update prompt: \(error)", log: Logger.settings, type: .error)
+        }
+        fetchPrompts()
     }
-    
+
     func deletePrompt(id: String) {
-        prompts.removeAll { $0.id == id }
-        
+        guard let prompt = prompts.first(where: { $0.id == id }) else { return }
+
+        modelContext.delete(prompt)
+        do {
+            try modelContext.save()
+        } catch {
+            Logger.log("Failed to delete prompt: \(error)", log: Logger.settings, type: .error)
+        }
+        fetchPrompts()
+
         // If the deleted prompt was selected, select the first available prompt or nil
         if selectedPromptId == id {
             selectedPromptId = prompts.first?.id
         }
     }
-    
+
     func selectPrompt(id: String) {
         if prompts.contains(where: { $0.id == id }) {
             selectedPromptId = id
         }
     }
-    
+
     // MARK: - Reset Settings
-    
+
     func resetToDefaults() {
         // Update published properties directly (synchronously)
         // This will trigger didSet observers which will update UserDefaults
@@ -390,8 +458,18 @@ class SettingsStore: ObservableObject {
         meetingHotkeyKey = DefaultSettings.meetingHotkeyKey
         holdToTalk = DefaultSettings.holdToTalk
         selectedLLMModelName = DefaultSettings.selectedLLMModelName
-        prompts = DefaultSettings.prompts
-        selectedPromptId = DefaultSettings.selectedPromptId
-    }
 
+        do {
+            try modelContext.delete(model: Prompt.self)
+            try modelContext.save()
+        } catch {
+            Logger.log("Failed to clear prompts: \(error)", log: Logger.settings, type: .error)
+        }
+        seedDefaultPrompts()
+        fetchPrompts()
+        selectedPromptId = prompts.first?.id
+
+        defaults.removeObject(forKey: "did_migrate_to_swiftdata")
+        defaults.set(true, forKey: "did_migrate_to_swiftdata")
+    }
 }

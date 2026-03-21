@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class PromptEntity {
+final class Prompt {
     @Attribute(.unique) var id: String
     var label: String
     var content: String
