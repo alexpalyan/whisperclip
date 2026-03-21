@@ -1,7 +1,11 @@
 import Cocoa
 import Quartz
 
-class HotkeyManager: ObservableObject {
+protocol HotkeyManaging {
+    func updateSystemHotkey(hotkeyEnabled: Bool, modifier: NSEvent.ModifierFlags, keyCode: UInt16)
+}
+
+class HotkeyManager: ObservableObject, HotkeyManaging {
     private var eventTap: CFMachPort?
     var action: () -> Void = {}
     var keyUpAction: () -> Void = {}

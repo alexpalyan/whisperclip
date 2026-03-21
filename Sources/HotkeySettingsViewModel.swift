@@ -4,8 +4,8 @@ import Cocoa
 @MainActor
 class HotkeySettingsViewModel: ObservableObject {
     private let store: SettingsStore
-    private let hotkeyManager: HotkeyManager
-    private let meetingHotkeyManager: HotkeyManager
+    private let hotkeyManager: any HotkeyManaging
+    private let meetingHotkeyManager: any HotkeyManaging
 
     @Published var selectedModifierRawValue: UInt
     @Published var hotkeyKeyString: String
@@ -16,8 +16,8 @@ class HotkeySettingsViewModel: ObservableObject {
 
     init(
         store: SettingsStore = .shared,
-        hotkeyManager: HotkeyManager = .shared,
-        meetingHotkeyManager: HotkeyManager = .meetingShared
+        hotkeyManager: any HotkeyManaging = HotkeyManager.shared,
+        meetingHotkeyManager: any HotkeyManaging = HotkeyManager.meetingShared
     ) {
         self.store = store
         self.hotkeyManager = hotkeyManager

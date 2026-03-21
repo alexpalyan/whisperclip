@@ -76,7 +76,7 @@ class SettingsStore: ObservableObject {
         case selectedPromptId = "selectedPromptId"
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let modelContainer: ModelContainer
     private let modelContext: ModelContext
 
@@ -243,7 +243,8 @@ class SettingsStore: ObservableObject {
         return prompt.content
     }
 
-    private init(container: ModelContainer? = nil) {
+    init(defaults: UserDefaults = .standard, container: ModelContainer? = nil) {
+        self.defaults = defaults
         let resolvedContainer = container ?? SettingsDataContainer.create()
         self.modelContainer = resolvedContainer
         self.modelContext = ModelContext(resolvedContainer)
