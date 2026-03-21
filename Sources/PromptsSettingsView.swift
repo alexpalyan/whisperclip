@@ -2,13 +2,7 @@ import SwiftUI
 
 struct PromptsSettingsView: View {
     @ObservedObject var settings: SettingsStore
-
-    @State private var showingNewPromptDialog = false
-    @State private var newPromptLabel = ""
-    @State private var newPromptContent = ""
-    @State private var editingPromptId: String? = nil
-    @State private var editingPromptLabel = ""
-    @State private var editingPromptContent = ""
+    @StateObject var vm = PromptManagementViewModel()
 
     var body: some View {
         ScrollView {
@@ -24,7 +18,7 @@ struct PromptsSettingsView: View {
                             Spacer()
 
                             Button("New Prompt") {
-                                showingNewPromptDialog = true
+                                vm.showingNewPromptDialog = true
                             }
                             .buttonStyle(.borderedProminent)
                         }
@@ -71,13 +65,13 @@ struct PromptsSettingsView: View {
                                     PromptRowView(
                                         prompt: prompt,
                                         isSelected: settings.selectedPromptId == prompt.id,
-                                        isEditing: editingPromptId == prompt.id,
-                                        editingLabel: $editingPromptLabel,
-                                        editingContent: $editingPromptContent,
+                                        isEditing: vm.editingPromptId == prompt.id,
+                                        editingLabel: $vm.editingPromptLabel,
+                                        editingContent: $vm.editingPromptContent,
                                         onSelect: { settings.selectPrompt(id: prompt.id) },
-                                        onEdit: { startEditing(prompt) },
-                                        onSave: { savePromptEdits(prompt.id) },
-                                        onCancel: { cancelEditing() },
+                                        onEdit: { vm.startEditing(prompt) },
+                                        onSave: { vm.savePromptEdits(prompt.id) },
+                                        onCancel: { vm.cancelEditing() },
                                         onDelete: { settings.deletePrompt(id: prompt.id) }
                                     )
                                 }
@@ -95,12 +89,12 @@ struct PromptsSettingsView: View {
             }
             .padding()
         }
-        .sheet(isPresented: $showingNewPromptDialog) {
+        .sheet(isPresented: $vm.showingNewPromptDialog) {
             NewPromptDialog(
-                label: $newPromptLabel,
-                content: $newPromptContent,
-                onCreate: { createNewPrompt() },
-                onCancel: { cancelNewPrompt() }
+                label: $vm.newPromptLabel,
+                content: $vm.newPromptContent,
+                onCreate: { vm.createNewPrompt() },
+                onCancel: { vm.cancelNewPrompt() }
             )
         }
         .background(Color.black)
@@ -109,43 +103,6 @@ struct PromptsSettingsView: View {
         }
     }
 
-    private func createNewPrompt() {
-        guard !newPromptLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-
-        _ = settings.createPrompt(label: newPromptLabel, content: newPromptContent)
-
-        // Reset form
-        newPromptLabel = ""
-        newPromptContent = ""
-        showingNewPromptDialog = false
-    }
-
-    private func cancelNewPrompt() {
-        newPromptLabel = ""
-        newPromptContent = ""
-        showingNewPromptDialog = false
-    }
-
-    private func startEditing(_ prompt: Prompt) {
-        editingPromptId = prompt.id
-        editingPromptLabel = prompt.label
-        editingPromptContent = prompt.content
-    }
-
-    private func savePromptEdits(_ promptId: String) {
-        settings.updatePrompt(
-            id: promptId,
-            label: editingPromptLabel,
-            content: editingPromptContent
-        )
-        cancelEditing()
-    }
-
-    private func cancelEditing() {
-        editingPromptId = nil
-        editingPromptLabel = ""
-        editingPromptContent = ""
-    }
 }
 
 struct PromptRowView: View {
