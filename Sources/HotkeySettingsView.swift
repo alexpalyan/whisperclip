@@ -3,12 +3,7 @@ import Cocoa
 
 struct HotkeySettingsView: View {
     @ObservedObject var settings: SettingsStore
-    @State private var selectedModifierRawValue: UInt = NSEvent.ModifierFlags.command.rawValue
-    @State private var hotkeyKeyString: String = "Space"
-    @State private var selectedKeyCode: UInt16 = 49
-    @State private var meetingModifierRawValue: UInt = NSEvent.ModifierFlags.control.rawValue
-    @State private var meetingKeyString: String = "M"
-    @State private var meetingKeyCode: UInt16 = 46
+    @StateObject var vm = HotkeySettingsViewModel()
 
     var body: some View {
         ScrollView {
@@ -18,8 +13,7 @@ struct HotkeySettingsView: View {
                         Toggle("Enable Global Hotkey", isOn: Binding(
                             get: { settings.hotkeyEnabled },
                             set: { newValue in
-                                settings.hotkeyEnabled = newValue
-                                updateHotkey()
+                                vm.onHotkeyEnabledChanged(newValue)
                             }
                         ))
                         .font(.headline)
@@ -31,16 +25,14 @@ struct HotkeySettingsView: View {
                                     .fontWeight(.medium)
                                     .foregroundColor(.white)
 
-                                Picker("Modifier", selection: $selectedModifierRawValue) {
+                                Picker("Modifier", selection: $vm.selectedModifierRawValue) {
                                     ForEach(SettingsViewData.modifierOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                .onChange(of: selectedModifierRawValue) { _, newValue in
-                                    let modifierFlags = NSEvent.ModifierFlags(rawValue: newValue)
-                                    settings.hotkeyModifier = modifierFlags
-                                    updateHotkey()
+                                .onChange(of: vm.selectedModifierRawValue) { _, newValue in
+                                    vm.onModifierChanged(newValue)
                                 }
 
                                 Text("Key")
@@ -48,19 +40,17 @@ struct HotkeySettingsView: View {
                                     .fontWeight(.medium)
                                     .foregroundColor(.white)
 
-                                Picker("Key", selection: $selectedKeyCode) {
+                                Picker("Key", selection: $vm.selectedKeyCode) {
                                     ForEach(SettingsViewData.keyOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                .onChange(of: selectedKeyCode) { _, newValue in
-                                    settings.hotkeyKey = newValue
-                                    hotkeyKeyString = keyCodeToString(newValue)
-                                    updateHotkey()
+                                .onChange(of: vm.selectedKeyCode) { _, newValue in
+                                    vm.onKeyCodeChanged(newValue)
                                 }
 
-                                Text("Current hotkey: \(getModifierString()) + \(hotkeyKeyString)")
+                                Text("Current hotkey: \(vm.getModifierString()) + \(vm.hotkeyKeyString)")
                                     .font(.caption)
                                     .foregroundColor(.gray)
                             }
@@ -102,8 +92,7 @@ struct HotkeySettingsView: View {
                         Toggle("Enable Meeting Hotkey", isOn: Binding(
                             get: { settings.meetingHotkeyEnabled },
                             set: { newValue in
-                                settings.meetingHotkeyEnabled = newValue
-                                updateMeetingHotkey()
+                                vm.onMeetingHotkeyEnabledChanged(newValue)
                             }
                         ))
                         .font(.headline)
@@ -115,15 +104,14 @@ struct HotkeySettingsView: View {
                                     .fontWeight(.medium)
                                     .foregroundColor(.white)
 
-                                Picker("Modifier", selection: $meetingModifierRawValue) {
+                                Picker("Modifier", selection: $vm.meetingModifierRawValue) {
                                     ForEach(SettingsViewData.modifierOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                .onChange(of: meetingModifierRawValue) { _, newValue in
-                                    settings.meetingHotkeyModifier = NSEvent.ModifierFlags(rawValue: newValue)
-                                    updateMeetingHotkey()
+                                .onChange(of: vm.meetingModifierRawValue) { _, newValue in
+                                    vm.onMeetingModifierChanged(newValue)
                                 }
 
                                 Text("Key")
@@ -131,19 +119,17 @@ struct HotkeySettingsView: View {
                                     .fontWeight(.medium)
                                     .foregroundColor(.white)
 
-                                Picker("Key", selection: $meetingKeyCode) {
+                                Picker("Key", selection: $vm.meetingKeyCode) {
                                     ForEach(SettingsViewData.meetingKeyOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
                                 .pickerStyle(.menu)
-                                .onChange(of: meetingKeyCode) { _, newValue in
-                                    settings.meetingHotkeyKey = newValue
-                                    meetingKeyString = meetingKeyCodeToString(newValue)
-                                    updateMeetingHotkey()
+                                .onChange(of: vm.meetingKeyCode) { _, newValue in
+                                    vm.onMeetingKeyCodeChanged(newValue)
                                 }
 
-                                Text("Current hotkey: \(getMeetingModifierString()) + \(meetingKeyString)")
+                                Text("Current hotkey: \(vm.getMeetingModifierString()) + \(vm.meetingKeyString)")
                                     .font(.caption)
                                     .foregroundColor(.gray)
                             }
@@ -165,77 +151,14 @@ struct HotkeySettingsView: View {
             Label("Hot Key", systemImage: "keyboard")
         }
         .onAppear {
-            loadHotkeySettings()
+            vm.loadHotkeySettings()
         }
         .onChange(of: settings.hotkeyModifier) { _, newValue in
-            selectedModifierRawValue = newValue.rawValue
+            vm.selectedModifierRawValue = newValue.rawValue
         }
         .onChange(of: settings.hotkeyKey) { _, newValue in
-            selectedKeyCode = newValue
-            hotkeyKeyString = keyCodeToString(newValue)
+            vm.selectedKeyCode = newValue
+            vm.hotkeyKeyString = vm.keyCodeToString(newValue)
         }
-    }
-
-    private func loadHotkeySettings() {
-        selectedModifierRawValue = settings.hotkeyModifier.rawValue
-        selectedKeyCode = settings.hotkeyKey
-        hotkeyKeyString = keyCodeToString(settings.hotkeyKey)
-        meetingModifierRawValue = settings.meetingHotkeyModifier.rawValue
-        meetingKeyCode = settings.meetingHotkeyKey
-        meetingKeyString = meetingKeyCodeToString(settings.meetingHotkeyKey)
-    }
-
-    private func updateHotkey() {
-        HotkeyManager.shared.updateSystemHotkey(
-            hotkeyEnabled: settings.hotkeyEnabled,
-            modifier: settings.hotkeyModifier,
-            keyCode: settings.hotkeyKey
-        )
-    }
-
-    private func updateMeetingHotkey() {
-        HotkeyManager.meetingShared.updateSystemHotkey(
-            hotkeyEnabled: settings.meetingHotkeyEnabled,
-            modifier: settings.meetingHotkeyModifier,
-            keyCode: settings.meetingHotkeyKey
-        )
-    }
-
-    private func getModifierString() -> String {
-        let modifierRawValue = settings.hotkeyModifier.rawValue
-        for option in SettingsViewData.modifierOptions {
-            if option.0 == modifierRawValue {
-                return option.1
-            }
-        }
-        return "⌘ Command"
-    }
-
-    private func getMeetingModifierString() -> String {
-        let modifierRawValue = settings.meetingHotkeyModifier.rawValue
-        for option in SettingsViewData.modifierOptions {
-            if option.0 == modifierRawValue {
-                return option.1
-            }
-        }
-        return "⌃ Control"
-    }
-
-    private func keyCodeToString(_ keyCode: UInt16) -> String {
-        for option in SettingsViewData.keyOptions {
-            if option.0 == keyCode {
-                return option.1
-            }
-        }
-        return "Key \(keyCode)"
-    }
-
-    private func meetingKeyCodeToString(_ keyCode: UInt16) -> String {
-        for option in SettingsViewData.meetingKeyOptions {
-            if option.0 == keyCode {
-                return option.1
-            }
-        }
-        return "Key \(keyCode)"
     }
 }
