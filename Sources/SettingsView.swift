@@ -32,91 +32,6 @@ struct SettingsView: View {
     @State private var showingDeleteModelsConfirmation = false
     @State private var totalModelsSize: Int64 = 0
     
-    // Language options
-    private let languageOptions = [
-        ("auto", "Auto Detect"),
-        ("en", "English"),
-        ("uk", "Ukrainian"),
-        ("es", "Spanish"),
-        ("fr", "French"),
-        ("de", "German"),
-        ("it", "Italian"),
-        ("pt", "Portuguese"),
-        ("ru", "Russian"),
-        ("ja", "Japanese"),
-        ("ko", "Korean"),
-        ("zh", "Chinese"),
-        ("ar", "Arabic"),
-        ("hi", "Hindi"),
-        ("tr", "Turkish"),
-        ("pl", "Polish"),
-        ("nl", "Dutch"),
-        ("sv", "Swedish"),
-        ("da", "Danish"),
-        ("no", "Norwegian"),
-        ("fi", "Finnish")
-    ]
-
-    private let summaryLanguageOptions = [
-        ("auto", "Match Transcript"),
-        ("en", "English"),
-        ("uk", "Ukrainian")
-    ]
-    
-    // Modifier key options using raw values
-    private let modifierOptions: [(UInt, String)] = [
-        (NSEvent.ModifierFlags.command.rawValue, "⌘ Command"),
-        (NSEvent.ModifierFlags.option.rawValue, "⌥ Option"),
-        (NSEvent.ModifierFlags.control.rawValue, "⌃ Control"),
-        (NSEvent.ModifierFlags.shift.rawValue, "⇧ Shift"),
-        (NSEvent.ModifierFlags([.command, .option]).rawValue, "⌘⌥ Command+Option"),
-        (NSEvent.ModifierFlags([.command, .control]).rawValue, "⌘⌃ Command+Control"),
-        (NSEvent.ModifierFlags([.command, .shift]).rawValue, "⌘⇧ Command+Shift"),
-        (NSEvent.ModifierFlags([.option, .control]).rawValue, "⌥⌃ Option+Control"),
-        (NSEvent.ModifierFlags([.option, .shift]).rawValue, "⌥⇧ Option+Shift"),
-        (NSEvent.ModifierFlags([.control, .shift]).rawValue, "⌃⇧ Control+Shift")
-    ]
-    
-    // Meeting hotkey key options (includes letter keys since they're used with modifiers)
-    private let meetingKeyOptions: [(UInt16, String)] = [
-        (46, "M"),
-        (45, "N"),
-        (15, "R"),
-        (49, "Space"),
-        (36, "Return"),
-        (96, "F5"),
-        (97, "F6"),
-        (98, "F7"),
-        (100, "F8"),
-        (101, "F9"),
-        (109, "F10"),
-        (103, "F11"),
-        (111, "F12"),
-        (105, "F13"),
-        (107, "F14"),
-        (113, "F15")
-    ]
-    
-    // Allowed key options (safe keys that won't interfere with system hotkeys)
-    private let keyOptions: [(UInt16, String)] = [
-        (49, "Space"),
-        (36, "Return"),
-        (48, "Tab"),
-        (51, "Delete"),
-        (53, "Escape"),
-        (96, "F5"),
-        (97, "F6"),
-        (98, "F7"),
-        (100, "F8"),
-        (101, "F9"),
-        (109, "F10"),
-        (103, "F11"),
-        (111, "F12"),
-        (105, "F13"),
-        (107, "F14"),
-        (113, "F15")
-    ]
-    
     var body: some View {
         TabView {
             generalTab
@@ -347,7 +262,7 @@ struct SettingsView: View {
                                     .foregroundColor(.white)
                                 
                                 Picker("Modifier", selection: $selectedModifierRawValue) {
-                                    ForEach(modifierOptions, id: \.0) { option in
+                                    ForEach(SettingsViewData.modifierOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
@@ -364,7 +279,7 @@ struct SettingsView: View {
                                     .foregroundColor(.white)
                                 
                                 Picker("Key", selection: $selectedKeyCode) {
-                                    ForEach(keyOptions, id: \.0) { option in
+                                    ForEach(SettingsViewData.keyOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
@@ -431,7 +346,7 @@ struct SettingsView: View {
                                     .foregroundColor(.white)
                                 
                                 Picker("Modifier", selection: $meetingModifierRawValue) {
-                                    ForEach(modifierOptions, id: \.0) { option in
+                                    ForEach(SettingsViewData.modifierOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
@@ -447,7 +362,7 @@ struct SettingsView: View {
                                     .foregroundColor(.white)
                                 
                                 Picker("Key", selection: $meetingKeyCode) {
-                                    ForEach(meetingKeyOptions, id: \.0) { option in
+                                    ForEach(SettingsViewData.meetingKeyOptions, id: \.0) { option in
                                         Text(option.1).tag(option.0)
                                     }
                                 }
@@ -566,7 +481,7 @@ struct SettingsView: View {
                                 .foregroundColor(.white)
 
                             Picker("Summary Language", selection: $selectedSummaryLanguage) {
-                                ForEach(summaryLanguageOptions, id: \.0) { option in
+                                ForEach(SettingsViewData.summaryLanguageOptions, id: \.0) { option in
                                     Text(option.1).tag(option.0)
                                 }
                             }
@@ -887,7 +802,7 @@ struct SettingsView: View {
                     .foregroundColor(.white)
                 
                 Picker("Language", selection: $selectedLanguage) {
-                    ForEach(languageOptions, id: \.0) { option in
+                    ForEach(SettingsViewData.languageOptions, id: \.0) { option in
                         Text(option.1).tag(option.0)
                     }
                 }
@@ -943,7 +858,7 @@ struct SettingsView: View {
     
     private func getModifierString() -> String {
         let modifierRawValue = settings.hotkeyModifier.rawValue
-        for option in modifierOptions {
+        for option in SettingsViewData.modifierOptions {
             if option.0 == modifierRawValue {
                 return option.1
             }
@@ -953,7 +868,7 @@ struct SettingsView: View {
     
     private func getMeetingModifierString() -> String {
         let modifierRawValue = settings.meetingHotkeyModifier.rawValue
-        for option in modifierOptions {
+        for option in SettingsViewData.modifierOptions {
             if option.0 == modifierRawValue {
                 return option.1
             }
@@ -963,7 +878,7 @@ struct SettingsView: View {
     
     private func keyCodeToString(_ keyCode: UInt16) -> String {
         // Map key codes to their string representations
-        for option in keyOptions {
+        for option in SettingsViewData.keyOptions {
             if option.0 == keyCode {
                 return option.1
             }
@@ -972,7 +887,7 @@ struct SettingsView: View {
     }
     
     private func meetingKeyCodeToString(_ keyCode: UInt16) -> String {
-        for option in meetingKeyOptions {
+        for option in SettingsViewData.meetingKeyOptions {
             if option.0 == keyCode {
                 return option.1
             }
