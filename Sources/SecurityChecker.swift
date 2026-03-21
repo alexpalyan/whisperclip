@@ -82,42 +82,7 @@ class SecurityChecker: ObservableObject {
     }
     
     func checkAppleEventsPermission() -> PermissionStatus {
-        // Try to control System Events with a simple command
-        let script = """
-        tell application "System Events"
-            set frontProcess to first process
-            return name of frontProcess
-        end tell
-        """
-
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: script) {
-            let _ = scriptObject.executeAndReturnError(&error)
-            if error == nil {
-                Logger.log("Apple Events permission granted", log: Logger.general)
-                return PermissionStatus(
-                    isGranted: true,
-                    message: "Apple Events permission granted"
-                )
-            }
-
-            // Check for permission denied error
-            if let errorNumber = error?[NSAppleScript.errorNumber] as? NSNumber,
-               errorNumber.intValue == -1743 {
-                Logger.log("Apple Events permission denied", log: Logger.general)
-                return PermissionStatus(
-                    isGranted: false,
-                    message: "Apple Events permission required for clipboard operations"
-                )
-            }
-
-            Logger.log("Apple Events check error: \(error ?? [:])", log: Logger.general, type: .error)
-        }
-
-        return PermissionStatus(
-            isGranted: false,
-            message: "Apple Events permission required for clipboard operations"
-        )
+        return checkAppleEventsPermissionInternal(askUserIfNeeded: false)
     }
 
     func areAllPermissionsGranted() -> Bool {
@@ -178,29 +143,46 @@ class SecurityChecker: ObservableObject {
 
     func requestAppleEventsPermission() {
         Logger.log("Requesting Apple Events permission", log: Logger.general)
-        // Try to control System Events with a more specific command that will trigger the permission dialog
-        let script = """
-        tell application "System Events"
-            tell process "System Settings"
-                return name
-            end tell
-        end tell
-        """
-
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: script) {
-            let _ = scriptObject.executeAndReturnError(&error)
-            if error == nil {
-                Logger.log("Apple Events permission granted", log: Logger.general)
-            } else {
-                Logger.log("Apple Events permission denied: \(error?.description ?? "unknown error")", log: Logger.general)
-            }
+        let status = checkAppleEventsPermissionInternal(askUserIfNeeded: true)
+        if status.isGranted {
+            Logger.log("Apple Events permission granted", log: Logger.general)
         } else {
-            Logger.log("Failed to create AppleScript object", log: Logger.general)
+            Logger.log("Apple Events permission denied", log: Logger.general)
         }
         // Update the published property to trigger UI refresh
         DispatchQueue.main.async {
             self.updateAllPermissions()
         }
+    }
+
+    private func checkAppleEventsPermissionInternal(askUserIfNeeded: Bool) -> PermissionStatus {
+        let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.systemevents")
+
+        let status = AEDeterminePermissionToAutomateTarget(
+            target.aeDesc,
+            AEEventClass(kAECoreSuite),
+            AEEventID(kAEOpenApplication),
+            askUserIfNeeded
+        )
+
+        if status == noErr {
+            return PermissionStatus(
+                isGranted: true,
+                message: "Apple Events permission granted"
+            )
+        }
+
+        if status == errAEEventNotPermitted {
+            return PermissionStatus(
+                isGranted: false,
+                message: "Apple Events permission required for clipboard operations"
+            )
+        }
+
+        Logger.log("Apple Events permission check failed: \(status)", log: Logger.general, type: .error)
+        return PermissionStatus(
+            isGranted: false,
+            message: "Apple Events permission required for clipboard operations"
+        )
     }
 }
