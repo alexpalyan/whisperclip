@@ -2,13 +2,10 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @ObservedObject var settings: SettingsStore
+    @StateObject var llmVM = LLMModelViewModel()
     @State private var selectedLanguage: String = "auto"
-    @State private var llmDownloadInProgress = false
-    @State private var llmDownloadModelName: String? = nil
-    @State private var llmDownloadProgress: Double = 0
     @State private var showingResetConfirmation = false
     @State private var showingDeleteModelsConfirmation = false
-    @State private var totalModelsSize: Int64 = 0
 
     var body: some View {
         ScrollView {
@@ -109,12 +106,12 @@ struct GeneralSettingsView: View {
                             .foregroundColor(.gray)
 
                         HStack {
-                            Button("Delete All Models (\(GenericHelper.formatSize(size: totalModelsSize)))") {
+                            Button("Delete All Models (\(GenericHelper.formatSize(size: llmVM.totalModelsSize)))") {
                                 showingDeleteModelsConfirmation = true
                             }
                             .buttonStyle(.bordered)
                             .foregroundColor(.red)
-                            .disabled(totalModelsSize == 0)
+                            .disabled(llmVM.totalModelsSize == 0)
 
                             Spacer()
                         }
@@ -124,7 +121,7 @@ struct GeneralSettingsView: View {
                 .background(Color.gray.opacity(0.2))
                 .cornerRadius(8)
                 .onAppear {
-                    refreshModelsSize()
+                    llmVM.refreshModelsSize()
                 }
 
                 GroupBox {
@@ -169,7 +166,7 @@ struct GeneralSettingsView: View {
         .alert("Delete All Models", isPresented: $showingDeleteModelsConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Delete All", role: .destructive) {
-                deleteAllModels()
+                llmVM.deleteAllModels()
             }
         } message: {
             Text("Are you sure you want to delete all downloaded AI models? This will free up disk space but you'll need to re-download models when they're needed again. This action cannot be undone.")
@@ -227,7 +224,7 @@ struct GeneralSettingsView: View {
                     ForEach(LLMModels) { model in
                         let isDownloaded = ModelStorage.shared.isLLMModelDownloaded(modelName: model.id)
                         let isSelected = settings.selectedLLMModelName == model.id
-                        let isDownloading = llmDownloadInProgress && llmDownloadModelName == model.id
+                        let isDownloading = llmVM.llmDownloadInProgress && llmVM.llmDownloadModelName == model.id
 
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -257,7 +254,7 @@ struct GeneralSettingsView: View {
                             Spacer()
 
                             if isDownloading {
-                                ProgressView(value: llmDownloadProgress)
+                                ProgressView(value: llmVM.llmDownloadProgress)
                                     .progressViewStyle(.linear)
                                     .frame(width: 120)
                             } else if isDownloaded {
@@ -269,16 +266,16 @@ struct GeneralSettingsView: View {
                                 }
 
                                 Button("Delete") {
-                                    deleteLLMModel(modelName: model.id)
+                                    llmVM.deleteLLMModel(modelName: model.id)
                                 }
                                 .buttonStyle(.bordered)
                                 .foregroundColor(.red)
                             } else {
                                 Button("Download") {
-                                    downloadLLMModel(modelName: model.id)
+                                    llmVM.downloadLLMModel(modelName: model.id)
                                 }
                                 .buttonStyle(.bordered)
-                                .disabled(llmDownloadInProgress)
+                                .disabled(llmVM.llmDownloadInProgress)
                             }
                         }
                         .padding(8)
@@ -330,64 +327,5 @@ struct GeneralSettingsView: View {
     private func resetSettings() {
         settings.resetToDefaults()
         selectedLanguage = settings.language
-    }
-
-    private func downloadLLMModel(modelName: String) {
-        llmDownloadInProgress = true
-        llmDownloadModelName = modelName
-        llmDownloadProgress = 0
-
-        Task {
-            let modelID = "\(CurrentLLMModelRepo)/\(modelName)"
-            do {
-                let _ = try await ModelStorage.shared.downloadModel(modelRepo: modelID, modelName: "", progress: { progress in
-                    Task { @MainActor in
-                        llmDownloadProgress = progress
-                    }
-                })
-                try await ModelStorage.shared.preLoadModel(modelRepo: modelID, modelName: "")
-                await MainActor.run {
-                    settings.selectedLLMModelName = modelName
-                    llmDownloadInProgress = false
-                    llmDownloadModelName = nil
-                    llmDownloadProgress = 0
-                    refreshModelsSize()
-                }
-            } catch {
-                Logger.log("Failed to download LLM model: \(error)", log: Logger.general, type: .error)
-                await MainActor.run {
-                    llmDownloadInProgress = false
-                    llmDownloadModelName = nil
-                    llmDownloadProgress = 0
-                }
-            }
-        }
-    }
-
-    private func deleteLLMModel(modelName: String) {
-        let modelID = "\(CurrentLLMModelRepo)/\(modelName)"
-        do {
-            try ModelStorage.shared.deleteModel(modelRepo: modelID, modelName: "")
-            Logger.log("Deleted LLM model: \(modelName)", log: Logger.general)
-        } catch {
-            Logger.log("Failed to delete LLM model: \(error)", log: Logger.general, type: .error)
-        }
-
-        if settings.selectedLLMModelName == modelName {
-            let fallback = ModelStorage.shared.getDownloadedLLMModelNames().first(where: { $0 != modelName }) ?? CurrentLLMModelName
-            settings.selectedLLMModelName = fallback
-        }
-
-        refreshModelsSize()
-    }
-
-    private func deleteAllModels() {
-        ModelStorage.shared.deleteAllModels()
-        Logger.log("All models deleted by user", log: Logger.general)
-        refreshModelsSize()
-    }
-
-    private func refreshModelsSize() {
-        totalModelsSize = ModelStorage.shared.getTotalModelsSize()
     }
 }
