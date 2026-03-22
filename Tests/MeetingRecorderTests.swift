@@ -1,5 +1,4 @@
 import XCTest
-import FluidAudio
 @testable import WhisperClip
 
 actor MockTranscriptionQueue {
@@ -145,6 +144,103 @@ final class MeetingRecorderTests: XCTestCase {
 
         XCTAssertEqual(processedBuffers.count, 1)
         XCTAssertEqual(processedBuffers.first?.speakerLabel, "Speaker 1")
+    }
+
+    // MARK: - GAP-08-01: System audio fallback when diarizer is unavailable
+
+    func testSystemAudioFallbackWhenDiarizerUnavailable() async throws {
+        let sampleRate = 16_000
+        let chunkDuration = 5.0
+        let chunkSampleCount = Int(Double(sampleRate) * chunkDuration)
+
+        var fallbackBuffer: [Float] = []
+        var fallbackStartTime: TimeInterval = 0
+        var dispatchedChunks: [(source: AudioSource, samples: [Float], startTime: TimeInterval)] = []
+
+        let batchSize = 16_000
+        for batchIndex in 0..<6 {
+            let time = TimeInterval(batchIndex)
+            let samples = Array(repeating: Float(0.1), count: batchSize)
+
+            if fallbackBuffer.isEmpty {
+                fallbackStartTime = time
+            }
+
+            fallbackBuffer.append(contentsOf: samples)
+
+            while fallbackBuffer.count >= chunkSampleCount {
+                dispatchedChunks.append((
+                    source: .system,
+                    samples: Array(fallbackBuffer.prefix(chunkSampleCount)),
+                    startTime: fallbackStartTime
+                ))
+                fallbackBuffer.removeFirst(chunkSampleCount)
+                if fallbackBuffer.isEmpty {
+                    fallbackStartTime = 0
+                } else {
+                    fallbackStartTime += chunkDuration
+                }
+            }
+        }
+
+        XCTAssertEqual(
+            dispatchedChunks.count,
+            1,
+            "Should dispatch one 5s chunk after accumulating 80,000+ samples"
+        )
+        XCTAssertEqual(
+            dispatchedChunks[0].samples.count,
+            80_000,
+            "Dispatched chunk should contain 5s of audio"
+        )
+        XCTAssertEqual(
+            dispatchedChunks[0].startTime,
+            0.0,
+            "First chunk should start at time 0"
+        )
+        XCTAssertEqual(
+            dispatchedChunks[0].source,
+            .system,
+            "Fallback chunks must be .system source"
+        )
+
+        let speaker = AudioSource.system.speaker
+        XCTAssertEqual(
+            speaker,
+            .other,
+            "System audio source must map to .other speaker for fallback attribution"
+        )
+
+        XCTAssertEqual(
+            fallbackBuffer.count,
+            16_000,
+            "Remaining samples should stay in buffer for flush on stop"
+        )
+        XCTAssertGreaterThanOrEqual(
+            dispatchedChunks[0].samples.count,
+            sampleRate * 2,
+            "Dispatched chunk must meet the 2s minimum sample threshold for ASR"
+        )
+    }
+
+    func testTranscriptionQueueProcessesSystemSourceChunks() async throws {
+        let queue = TranscriptionQueue()
+        var processedSources: [AudioSource] = []
+
+        let systemSamples = Array(repeating: Float(0.1), count: 80_000)
+
+        await queue.enqueue(
+            source: .system,
+            samples: systemSamples,
+            startTime: 0.0
+        ) { source, _, _ in
+            processedSources.append(source)
+        }
+
+        await queue.drain()
+
+        XCTAssertEqual(processedSources.count, 1, "Queue should process one system source chunk")
+        XCTAssertEqual(processedSources[0], .system, "Processed source should be .system")
     }
 }
 
