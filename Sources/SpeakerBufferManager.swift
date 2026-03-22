@@ -111,9 +111,10 @@ actor SpeakerBufferManager {
     // MARK: - Polling
 
     private func pollDiarizer() {
-        // Check 30s cap regardless of diarization result
-        if accumulatedSamples.count >= maxSamplesPerBuffer {
-            flushCurrentBuffer()
+        // Check 30s cap regardless of diarization result.
+        // Loop handles the case where a single onAudioBatch exceeded 2x the cap.
+        while accumulatedSamples.count >= maxSamplesPerBuffer {
+            flushCappedBuffer()
         }
 
         // Need samples for diarization
@@ -159,6 +160,35 @@ actor SpeakerBufferManager {
     }
 
     // MARK: - Buffer Flush
+
+    /// Force-flush exactly `maxSamplesPerBuffer` samples, keeping any overflow in `accumulatedSamples`.
+    /// Used only by the 30s cap check in `pollDiarizer()`.
+    private func flushCappedBuffer() {
+        let cappedSamples = Array(accumulatedSamples.prefix(maxSamplesPerBuffer))
+        let overflow = Array(accumulatedSamples.dropFirst(maxSamplesPerBuffer))
+
+        guard cappedSamples.count >= minSamplesPerBuffer else {
+            accumulatedSamples = overflow
+            return
+        }
+
+        let label = resolveLabel(for: currentSpeakerId)
+        let closed = ClosedSpeakerBuffer(
+            samples: cappedSamples,
+            speakerLabel: label,
+            startTime: bufferStartTime
+        )
+
+        Logger.log(
+            "SpeakerBufferManager: force-flushed capped buffer \(label) \(cappedSamples.count) samples",
+            log: Logger.general)
+
+        continuation?.yield(closed)
+
+        // Advance bufferStartTime for the overflow
+        bufferStartTime += Double(maxSamplesPerBuffer) / Double(sampleRate)
+        accumulatedSamples = overflow
+    }
 
     private func flushCurrentBuffer() {
         guard accumulatedSamples.count >= minSamplesPerBuffer else {

@@ -30,3 +30,17 @@ final class MockDiarizationProvider: DiarizationProvider, @unchecked Sendable {
         return result
     }
 }
+
+// MARK: - Test Helpers
+
+/// Creates a DiarizationResult with a single speaker segment
+func makeDiarizationResult(speakerId: String, durationSeconds: Float = 1.0) -> DiarizationResult {
+    let segment = TimedSpeakerSegment(
+        speakerId: speakerId,
+        embedding: [],
+        startTimeSeconds: 0.0,
+        endTimeSeconds: durationSeconds,
+        qualityScore: 0.9
+    )
+    return DiarizationResult(segments: [segment])
+}
