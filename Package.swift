@@ -29,6 +29,9 @@ let package = Package(
                 .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ],
             path: "Sources",
+            swiftSettings: [
+                .unsafeFlags(["-strict-concurrency=complete"])
+            ],
             linkerSettings: [
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("AppKit"),
