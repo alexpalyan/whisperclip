@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import ScreenCaptureKit
+import Accelerate
 
 /// Audio source identifier for speaker detection
 enum AudioSource {
@@ -55,6 +56,7 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     private var chunkTimer: Timer?
     private var levelTimer: Timer?
     private var audioCallback: AudioChunkCallback?
+    nonisolated(unsafe) private var onSystemBatch: (@Sendable ([Float], TimeInterval) -> Void)?
     
     // MARK: - Initialization
     
@@ -81,12 +83,16 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     // MARK: - Capture Control
     
     /// Start capturing from both microphone and system audio
-    func startCapture(onAudioChunk: @escaping AudioChunkCallback) async throws {
+    func startCapture(
+        onAudioChunk: @escaping AudioChunkCallback,
+        onSystemBatch: @escaping @Sendable ([Float], TimeInterval) -> Void
+    ) async throws {
         guard !isCapturing else {
             throw DualChannelError.alreadyCapturing
         }
         
         audioCallback = onAudioChunk
+        self.onSystemBatch = onSystemBatch
         startTime = Date()
         
         // Start microphone capture
@@ -114,9 +120,9 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     /// Callers should process the returned samples before tearing down the
     /// transcription pipeline.
     @discardableResult
-    func stopCapture() async -> (mic: (samples: [Float], startTime: TimeInterval), system: (samples: [Float], startTime: TimeInterval)) {
+    func stopCapture() async -> (samples: [Float], startTime: TimeInterval) {
         guard isCapturing else {
-            return (mic: ([], 0), system: ([], 0))
+            return ([], 0)
         }
         
         // Stop timers
@@ -135,16 +141,16 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
             scStream = nil
         }
         
-        // Drain remaining audio from buffers (awaited, not fire-and-forget)
+        // Drain remaining microphone audio from buffers (awaited, not fire-and-forget)
         let micResult = await audioBuffers.getMicSamples()
-        let systemResult = await audioBuffers.getSystemSamples()
         
         isCapturing = false
         audioCallback = nil
+        onSystemBatch = nil
         
         Logger.log("Dual channel audio capture stopped", log: Logger.general)
         
-        return (mic: micResult, system: systemResult)
+        return micResult
     }
     
     // MARK: - Microphone Capture
@@ -279,14 +285,26 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
                 Logger.log("Processing microphone chunk: \(micResult.samples.count) samples at \(String(format: "%.1f", micResult.startTime))s", log: Logger.general)
                 callback(.microphone, micResult.samples, micResult.startTime)
             }
-            
-            // Get system audio samples with their actual start time
-            let systemResult = await audioBuffers.getSystemSamples()
-            if systemResult.samples.count >= minSamples {
-                Logger.log("Processing system audio chunk: \(systemResult.samples.count) samples at \(String(format: "%.1f", systemResult.startTime))s", log: Logger.general)
-                callback(.system, systemResult.samples, systemResult.startTime)
-            }
         }
+    }
+
+    /// Processes raw system audio buffer data and invokes onSystemBatch.
+    /// Extracted for testability - SCStreamOutput handler calls this after format validation.
+    nonisolated internal func processSystemAudioSamples(
+        data: UnsafeRawPointer,
+        byteCount: Int,
+        onSystemBatch: ([Float], TimeInterval) -> Void,
+        elapsed: TimeInterval
+    ) {
+        let count = byteCount / MemoryLayout<Float>.size
+        guard count > 0 else { return }
+        let samples = Array(
+            UnsafeBufferPointer(
+                start: data.assumingMemoryBound(to: Float.self),
+                count: count
+            )
+        )
+        onSystemBatch(samples, elapsed)
     }
     
     // MARK: - Level Monitoring
@@ -333,35 +351,56 @@ extension DualChannelAudioCapture: SCStreamDelegate {
 extension DualChannelAudioCapture: SCStreamOutput {
     nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
-        
-        // Extract audio samples from CMSampleBuffer
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
-        
-        var length = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        
-        let status = CMBlockBufferGetDataPointer(blockBuffer, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &dataPointer)
-        
-        guard status == kCMBlockBufferNoErr, let data = dataPointer, length > 0 else { return }
-        
-        // Convert to Float samples (assuming 32-bit float format from ScreenCaptureKit)
-        let floatCount = length / MemoryLayout<Float>.size
-        let floatPointer = UnsafeRawPointer(data).bindMemory(to: Float.self, capacity: floatCount)
-        let samples = Array(UnsafeBufferPointer(start: floatPointer, count: floatCount))
-        
-        // Calculate level
-        if samples.count > 0 {
-            let rms = sqrt(samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count))
-            let db = 20 * log10(max(rms, 0.0001))
-            Task { @MainActor in
-                self.systemLevel = db
-            }
+
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc)?.pointee else {
+            Logger.log("System audio: missing format description - discarding buffer", log: Logger.general, type: .error)
+            return
         }
-        
-        // Add to buffer using actor with elapsed time
-        let elapsed = self.startTime.map { Date().timeIntervalSince($0) } ?? 0
-        Task {
-            await self.audioBuffers.appendSystemSamples(samples, atTime: elapsed)
+
+        guard asbd.mFormatID == kAudioFormatLinearPCM,
+              asbd.mFormatFlags & kLinearPCMFormatFlagIsFloat != 0,
+              asbd.mBitsPerChannel == 32 else {
+            Logger.log(
+                "System audio: unexpected format (id=\(asbd.mFormatID), flags=\(asbd.mFormatFlags), bits=\(asbd.mBitsPerChannel)) - discarding buffer",
+                log: Logger.general,
+                type: .error
+            )
+            return
+        }
+
+        _ = try? sampleBuffer.withAudioBufferList { audioBufferList, _ -> Void in
+            for buffer in audioBufferList {
+                guard let mData = buffer.mData else { continue }
+                let byteCount = Int(buffer.mDataByteSize)
+                guard byteCount > 0 else { continue }
+
+                let count = byteCount / MemoryLayout<Float>.size
+                let samples = Array(
+                    UnsafeBufferPointer(
+                        start: mData.assumingMemoryBound(to: Float.self),
+                        count: count
+                    )
+                )
+                guard !samples.isEmpty else { continue }
+
+                var rms: Float = 0
+                vDSP_rmsqv(samples, 1, &rms, vDSP_Length(samples.count))
+                let db = 20 * log10(max(rms, 0.0001))
+                Task { @MainActor [weak self] in
+                    self?.systemLevel = db
+                }
+
+                let elapsed = self.startTime.map { Date().timeIntervalSince($0) } ?? 0
+                if let onSystemBatch = self.onSystemBatch {
+                    self.processSystemAudioSamples(
+                        data: UnsafeRawPointer(mData),
+                        byteCount: byteCount,
+                        onSystemBatch: onSystemBatch,
+                        elapsed: elapsed
+                    )
+                }
+            }
         }
     }
 }
@@ -372,22 +411,13 @@ extension DualChannelAudioCapture: SCStreamOutput {
 
 private actor AudioBufferActor {
     var micBuffer: [Float] = []
-    var systemBuffer: [Float] = []
     var micBufferStartTime: TimeInterval?
-    var systemBufferStartTime: TimeInterval?
     
     func appendMicSamples(_ samples: [Float], atTime time: TimeInterval) {
         if micBuffer.isEmpty {
             micBufferStartTime = time
         }
         micBuffer.append(contentsOf: samples)
-    }
-    
-    func appendSystemSamples(_ samples: [Float], atTime time: TimeInterval) {
-        if systemBuffer.isEmpty {
-            systemBufferStartTime = time
-        }
-        systemBuffer.append(contentsOf: samples)
     }
     
     func getMicSamples() -> (samples: [Float], startTime: TimeInterval) {
@@ -397,20 +427,10 @@ private actor AudioBufferActor {
         micBufferStartTime = nil
         return (samples, startTime)
     }
-    
-    func getSystemSamples() -> (samples: [Float], startTime: TimeInterval) {
-        let samples = systemBuffer
-        let startTime = systemBufferStartTime ?? 0
-        systemBuffer = []
-        systemBufferStartTime = nil
-        return (samples, startTime)
-    }
-    
+
     func clearAll() {
         micBuffer = []
-        systemBuffer = []
         micBufferStartTime = nil
-        systemBufferStartTime = nil
     }
 }
 
