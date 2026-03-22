@@ -1,19 +1,87 @@
 import Foundation
 
-/// Represents a speaker in a meeting
-/// Distinguished by audio source: microphone (Me) vs system audio (Other)
-enum Speaker: String, Codable, CaseIterable {
-    case me = "Me"
-    case other = "Other"
-    case unknown = "Unknown"
-    
-    var displayName: String { rawValue }
-    
+/// Represents a speaker in a meeting.
+/// - `.me`: the local microphone channel (always the app user)
+/// - `.other`: legacy system-audio channel label (pre-diarization)
+/// - `.unknown`: unidentified speaker
+/// - `.labeled(String)`: a diarized speaker identified by the diarization model (e.g. "Speaker 1")
+enum Speaker: Codable, Hashable {
+    case me
+    case other
+    case unknown
+    /// A diarized speaker with a human-readable label such as "Speaker 1".
+    case labeled(String)
+
+    // MARK: Codable
+
+    enum CodingKeys: String, CodingKey { case type, label }
+
+    init(from decoder: Decoder) throws {
+        // Support both old String-encoded values and new keyed encoding
+        if let raw = try? decoder.singleValueContainer().decode(String.self) {
+            switch raw {
+            case "Me":      self = .me
+            case "Other":   self = .other
+            case "Unknown": self = .unknown
+            default:        self = .labeled(raw)
+            }
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "me":      self = .me
+        case "other":   self = .other
+        case "labeled": self = .labeled(try container.decode(String.self, forKey: .label))
+        default:        self = .unknown
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .me:
+            var c = encoder.singleValueContainer(); try c.encode("Me")
+        case .other:
+            var c = encoder.singleValueContainer(); try c.encode("Other")
+        case .unknown:
+            var c = encoder.singleValueContainer(); try c.encode("Unknown")
+        case .labeled(let label):
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode("labeled", forKey: .type)
+            try c.encode(label, forKey: .label)
+        }
+    }
+
+    // MARK: Display
+
+    var displayName: String {
+        switch self {
+        case .me:             return "Me"
+        case .other:          return "Other"
+        case .unknown:        return "Unknown"
+        case .labeled(let l): return l
+        }
+    }
+
     var icon: String {
         switch self {
-        case .me: return "person.fill"
-        case .other: return "person.2.fill"
+        case .me:      return "person.fill"
+        case .other:   return "person.2.fill"
         case .unknown: return "questionmark.circle"
+        case .labeled: return "person.crop.circle"
+        }
+    }
+
+    // MARK: Color hint index (for consistent per-speaker colours in UI)
+
+    /// A stable index (0-based) used to pick a colour from a palette.
+    /// .me → 0, .other → 1, .unknown → 9, .labeled → hash-derived 2…8
+    var colorIndex: Int {
+        switch self {
+        case .me:             return 0
+        case .other:          return 1
+        case .unknown:        return 9
+        case .labeled(let l): return 2 + abs(l.hashValue) % 7
         }
     }
 }

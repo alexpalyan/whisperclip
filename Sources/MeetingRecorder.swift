@@ -24,20 +24,25 @@ class MeetingRecorder: NSObject, ObservableObject {
     @Published private(set) var hasSystemAudioPermission = false
     
     // MARK: - Audio Components
-    
+
     private var dualCapture: DualChannelAudioCapture?
     private var asrManager: AsrManager?
-    
+    private var diarizerManager: DiarizerManager?
+
     // MARK: - State
-    
+
     private var startTime: Date?
     private var durationTimer: Timer?
     private var transcriptCallback: MeetingTranscriptCallback?
     private var errorCallback: MeetingErrorCallback?
-    
+
     // Text deduplication per speaker
     private var processedMicTexts: Set<String> = []
     private var processedSystemTexts: Set<String> = []
+
+    // Maps raw diarizer speakerIds (e.g. "SPEAKER_00") to display labels (e.g. "Speaker 1")
+    private var speakerLabelMap: [String: String] = [:]
+    private var nextSpeakerNumber: Int = 1
     
     // Transcription queue to prevent concurrent CoreML predictions
     private let transcriptionQueue = TranscriptionQueue()
@@ -82,6 +87,27 @@ class MeetingRecorder: NSObject, ObservableObject {
             Logger.log("Failed to load ASR model: \(error)", log: Logger.general, type: .error)
             throw MeetingRecorderError.modelLoadFailed(error.localizedDescription)
         }
+
+        // Initialize diarizer (optional — falls back to channel-based attribution if unavailable)
+        if ModelStorage.shared.diarizerModelsExist() {
+            do {
+                let diarizerModels = try await DiarizerModels.load()
+                // clusteringThreshold=0.4 → speakerThreshold=0.48 (strict enough to distinguish
+                // different human voices, whose typical cosine distance is 0.3–0.6).
+                // DiarizerConfig.default uses 0.7 → speakerThreshold=0.84, which is too permissive
+                // and collapses all speakers into one.
+                let diarizer = DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.4))
+                diarizer.initialize(models: diarizerModels)
+                diarizerManager = diarizer
+                Logger.log("DiarizerManager initialized successfully", log: Logger.general)
+            } catch {
+                Logger.log("Failed to load diarizer models (will use channel-based speaker attribution): \(error)", log: Logger.general, type: .error)
+                diarizerManager = nil
+            }
+        } else {
+            Logger.log("Diarizer models not downloaded — using channel-based speaker attribution", log: Logger.general)
+            diarizerManager = nil
+        }
         
         // Create dual channel capture
         dualCapture = DualChannelAudioCapture()
@@ -118,6 +144,8 @@ class MeetingRecorder: NSObject, ObservableObject {
         lastError = nil
         processedMicTexts = []
         processedSystemTexts = []
+        speakerLabelMap = [:]
+        nextSpeakerNumber = 1
         hasSystemAudioPermission = capture.hasScreenCapturePermission
         
         // Start duration timer
@@ -192,7 +220,10 @@ class MeetingRecorder: NSObject, ObservableObject {
         processedMicTexts = []
         processedSystemTexts = []
         asrManager = nil
+        diarizerManager = nil
         dualCapture = nil
+        speakerLabelMap = [:]
+        nextSpeakerNumber = 1
     }
     
     // MARK: - Duration Timer
@@ -223,75 +254,152 @@ class MeetingRecorder: NSObject, ObservableObject {
             Logger.log("processAudioChunk: asrManager not available", log: Logger.general, type: .error)
             return
         }
-        
+
         guard isFinal || samples.count >= sampleRate * 2 else {
             Logger.log("processAudioChunk: not enough samples (\(samples.count))", log: Logger.general)
             return
         }
-        
-        let speaker = source.speaker
+
         let sourceName = source == .microphone ? "mic" : "system"
-        
+
         Logger.log("processAudioChunk: processing \(sourceName) chunk with \(samples.count) samples", log: Logger.general)
-        
+
         // Create temp WAV file for transcription
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting_\(sourceName)_\(UUID().uuidString).wav")
-        
+
         defer {
             try? FileManager.default.removeItem(at: tempURL)
         }
-        
+
         do {
             // Write samples to WAV file
             try writeWAVFile(samples: samples, to: tempURL)
-            
+
             // Transcribe
             let transcriptionResult = try await asrManager.transcribe(tempURL)
-            
+
             guard !transcriptionResult.text.isEmpty else {
                 Logger.log("processAudioChunk: empty transcription from \(sourceName)", log: Logger.general)
                 return
             }
-            
+
             // Clean and deduplicate based on source
             let normalizedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
             let newText = extractNewText(normalizedText, for: source)
-            
+
             guard !newText.isEmpty else {
                 Logger.log("processAudioChunk: no new text after deduplication from \(sourceName)", log: Logger.general)
                 return
             }
-            
-            // Calculate end time
+
+            // Determine speaker via diarization (if available) or fall back to channel attribution
             let chunkDuration = Double(samples.count) / Double(sampleRate)
             let endTime = startTime + chunkDuration
-            
-            // Create segment with correct speaker
+            let speaker = resolveSpeaker(source: source, samples: samples, chunkStartTime: startTime)
+
+            // Create segment
             let segment = MeetingSegment(
                 speaker: speaker,
                 text: newText,
                 startTime: startTime,
                 endTime: endTime,
-                confidence: 0.95  // High confidence since we know the source
+                confidence: 0.95
             )
-            
+
             segmentCount += 1
-            
+
             // Store for deduplication
             if source == .microphone {
                 processedMicTexts.insert(newText)
             } else {
                 processedSystemTexts.insert(newText)
             }
-            
+
             Logger.log("processAudioChunk: created \(speaker.displayName) segment #\(segmentCount): '\(newText.prefix(50))'", log: Logger.general)
-            
+
             transcriptCallback?(segment)
-            
+
         } catch {
             Logger.log("processAudioChunk: error processing \(sourceName): \(error)", log: Logger.general, type: .error)
             lastError = error.localizedDescription
+        }
+    }
+
+    /// Determines the `Speaker` for a chunk of audio.
+    ///
+    /// Microphone audio always returns `.me` — the local user's identity is known
+    /// from the capture channel and must not be overridden by diarization labels.
+    ///
+    /// For system audio, when `DiarizerManager` is available it runs diarization on
+    /// the raw samples and picks the speaker with the most speech time in the chunk,
+    /// mapping each unique speakerId to a stable human-readable label ("Speaker 1",
+    /// "Speaker 2", …) that persists for the entire recording session.
+    ///
+    /// Falls back to channel-based attribution if the diarizer is unavailable or
+    /// returns no segments.
+    private func resolveSpeaker(source: AudioSource, samples: [Float], chunkStartTime: TimeInterval) -> Speaker {
+        // Microphone is always "Me" — never override with a diarization label.
+        if source == .microphone {
+            return .me
+        }
+
+        Logger.log("resolveSpeaker: called for system audio chunk, \(samples.count) samples at t=\(String(format: "%.2f", chunkStartTime))s, diarizerManager=\(diarizerManager != nil ? "available" : "nil")", log: Logger.general)
+
+        guard let diarizer = diarizerManager else {
+            Logger.log("resolveSpeaker: no diarizerManager, falling back to channel attribution", log: Logger.general)
+            return source.speaker
+        }
+
+        do {
+            let result = try diarizer.performCompleteDiarization(samples, sampleRate: sampleRate, atTime: chunkStartTime)
+
+            Logger.log("resolveSpeaker: diarization returned \(result.segments.count) segments", log: Logger.general)
+
+            guard !result.segments.isEmpty else {
+                Logger.log("resolveSpeaker: diarization returned no segments for system audio, falling back to channel attribution", log: Logger.general)
+                return source.speaker
+            }
+
+            // Log all segments for diagnosis
+            for seg in result.segments {
+                Logger.log("resolveSpeaker: segment speakerId='\(seg.speakerId)' duration=\(String(format: "%.2f", seg.durationSeconds))s [\(String(format: "%.2f", seg.startTimeSeconds))s–\(String(format: "%.2f", seg.endTimeSeconds))s]", log: Logger.general)
+            }
+
+            // Pick the speakerId with the most total speech time in this chunk.
+            // Note: speakerIds (e.g. "SPEAKER_00") are stable within a single
+            // performCompleteDiarization call but not guaranteed across calls.
+            // We accumulate the map so that if the same raw ID recurs across chunks
+            // it receives a consistent label. In practice this works because
+            // FluidAudio's SpeakerManager tracks embeddings across calls when using
+            // the same DiarizerManager instance.
+            var durationBySpeaker: [String: Float] = [:]
+            for seg in result.segments {
+                durationBySpeaker[seg.speakerId, default: 0] += seg.durationSeconds
+            }
+
+            Logger.log("resolveSpeaker: duration by speakerId: \(durationBySpeaker.map { "\($0.key)=\(String(format: "%.2f", $0.value))s" }.sorted().joined(separator: ", "))", log: Logger.general)
+
+            guard let dominantId = durationBySpeaker.max(by: { $0.value < $1.value })?.key,
+                  !dominantId.isEmpty else {
+                Logger.log("resolveSpeaker: no dominant speaker found, falling back to channel attribution", log: Logger.general)
+                return source.speaker
+            }
+
+            // Map to stable display label
+            if let label = speakerLabelMap[dominantId] {
+                Logger.log("resolveSpeaker: dominantId='\(dominantId)' → existing label '\(label)' (labelMap=\(speakerLabelMap))", log: Logger.general)
+                return .labeled(label)
+            } else {
+                let label = "Speaker \(nextSpeakerNumber)"
+                speakerLabelMap[dominantId] = label
+                nextSpeakerNumber += 1
+                Logger.log("resolveSpeaker: new system-audio speaker '\(dominantId)' assigned label '\(label)' (labelMap now: \(speakerLabelMap))", log: Logger.general)
+                return .labeled(label)
+            }
+        } catch {
+            Logger.log("resolveSpeaker: diarization failed (\(error)), falling back to channel attribution", log: Logger.general, type: .error)
+            return source.speaker
         }
     }
     

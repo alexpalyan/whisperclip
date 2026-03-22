@@ -479,11 +479,7 @@ struct MeetingDetailView: View {
     }
     
     private func speakerColor(_ speaker: Speaker) -> Color {
-        switch speaker {
-        case .me: return .blue
-        case .other: return .purple
-        case .unknown: return .gray
-        }
+        speakerPaletteColor(speaker)
     }
     
     // MARK: - Actions Content
@@ -698,11 +694,7 @@ struct TranscriptSegmentRow: View {
     }
     
     private var speakerColor: Color {
-        switch segment.speaker {
-        case .me: return .blue
-        case .other: return .purple
-        case .unknown: return .gray
-        }
+        speakerPaletteColor(segment.speaker)
     }
 }
 

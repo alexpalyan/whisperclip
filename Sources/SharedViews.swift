@@ -1,5 +1,27 @@
 import SwiftUI
 
+// MARK: - Speaker colour palette (shared across all meeting views)
+
+/// Returns a stable `Color` for a given `Speaker` value.
+/// `.me` → blue, `.other` → purple, `.unknown` → gray,
+/// `.labeled` speakers cycle through a palette of distinct colours.
+func speakerPaletteColor(_ speaker: Speaker) -> Color {
+    let palette: [Color] = [
+        .blue,      // 0 – Me
+        .purple,    // 1 – Other (legacy)
+        .teal,      // 2 – Speaker 1
+        .orange,    // 3 – Speaker 2
+        .pink,      // 4 – Speaker 3
+        .green,     // 5 – Speaker 4
+        .yellow,    // 6 – Speaker 5
+        .red,       // 7 – Speaker 6
+        .indigo,    // 8 – Speaker 7
+    ]
+    if speaker == .unknown { return .gray }
+    let index = speaker.colorIndex
+    return palette[min(index, palette.count - 1)]
+}
+
 struct ResultView: View {
     let resultText: String
     let statusMessage: String

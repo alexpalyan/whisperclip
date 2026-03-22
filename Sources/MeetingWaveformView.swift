@@ -231,11 +231,7 @@ struct SpeakerBadge: View {
     }
     
     private var speakerColor: Color {
-        switch speaker {
-        case .me: return .blue
-        case .other: return .purple
-        case .unknown: return .gray
-        }
+        speakerPaletteColor(speaker)
     }
 }
 

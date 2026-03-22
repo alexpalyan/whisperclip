@@ -524,11 +524,7 @@ struct LiveSegmentRow: View {
     }
     
     private var speakerColor: Color {
-        switch segment.speaker {
-        case .me: return .blue
-        case .other: return .purple
-        case .unknown: return .gray
-        }
+        speakerPaletteColor(segment.speaker)
     }
 }
 
