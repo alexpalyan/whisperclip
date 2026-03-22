@@ -39,13 +39,8 @@ class MeetingRecorder: NSObject, ObservableObject {
     private var transcriptCallback: MeetingTranscriptCallback?
     private var errorCallback: MeetingErrorCallback?
 
-    // Text deduplication per speaker
+    // Text deduplication for the microphone path
     private var processedMicTexts: Set<String> = []
-    private var processedSystemTexts: Set<String> = []
-
-    // Maps raw diarizer speakerIds (e.g. "SPEAKER_00") to display labels (e.g. "Speaker 1")
-    private var speakerLabelMap: [String: String] = [:]
-    private var nextSpeakerNumber: Int = 1
     
     // Transcription queue to prevent concurrent CoreML predictions
     private let transcriptionQueue = TranscriptionQueue()
