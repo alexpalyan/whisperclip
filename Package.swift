@@ -15,6 +15,7 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift-examples.git", branch: "main"),
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.21.2"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.10.0"),
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", from: "2.4.0"),
     ],
     targets: [
         .executableTarget(
@@ -25,6 +26,7 @@ let package = Package(
                 .product(name: "MLXLMCommon", package: "mlx-swift-examples"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "FluidAudio", package: "FluidAudio"),
+                .product(name: "KeyboardShortcuts", package: "KeyboardShortcuts"),
             ],
             path: "Sources",
             linkerSettings: [
