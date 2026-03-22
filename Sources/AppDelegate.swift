@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Combine
 
 extension Notification.Name {
     static let showSetupGuide = Notification.Name("showSetupGuide")
@@ -11,10 +12,50 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
     var shouldReallyQuit = false
-    
+    private var cancellables = Set<AnyCancellable>()
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupSignalHandlers()
         setupStatusBarItem()
+
+        // Register hotkeys at launch from SettingsStore
+        let store = SettingsStore.shared
+        HotkeyManager.shared.updateSystemHotkey(
+            hotkeyEnabled: store.hotkeyEnabled,
+            modifier: store.hotkeyModifier,
+            keyCode: store.hotkeyKey
+        )
+        HotkeyManager.meetingShared.updateSystemHotkey(
+            hotkeyEnabled: store.meetingHotkeyEnabled,
+            modifier: store.meetingHotkeyModifier,
+            keyCode: store.meetingHotkeyKey
+        )
+
+        // Subscribe to future hotkey setting changes
+        Publishers.CombineLatest3(
+            store.$hotkeyEnabled,
+            store.$hotkeyModifier,
+            store.$hotkeyKey
+        )
+        .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+        .sink { enabled, modifier, keyCode in
+            HotkeyManager.shared.updateSystemHotkey(
+                hotkeyEnabled: enabled, modifier: modifier, keyCode: keyCode)
+        }
+        .store(in: &cancellables)
+
+        Publishers.CombineLatest3(
+            store.$meetingHotkeyEnabled,
+            store.$meetingHotkeyModifier,
+            store.$meetingHotkeyKey
+        )
+        .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+        .sink { enabled, modifier, keyCode in
+            HotkeyManager.meetingShared.updateSystemHotkey(
+                hotkeyEnabled: enabled, modifier: modifier, keyCode: keyCode)
+        }
+        .store(in: &cancellables)
+
         Logger.log("Application did finish launching", log: Logger.general)
         
         // Capture the main window reference after SwiftUI creates it
