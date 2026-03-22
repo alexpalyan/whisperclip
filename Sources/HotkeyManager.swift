@@ -1,21 +1,31 @@
 import Cocoa
-import Quartz
+import Carbon.HIToolbox
+import KeyboardShortcuts
+
+extension KeyboardShortcuts.Name {
+    static let recording = Self("recording")
+    static let meetingRecording = Self("meetingRecording")
+}
 
 protocol HotkeyManaging {
     func updateSystemHotkey(hotkeyEnabled: Bool, modifier: NSEvent.ModifierFlags, keyCode: UInt16)
 }
 
 class HotkeyManager: ObservableObject, HotkeyManaging {
-    private var eventTap: CFMachPort?
     var action: () -> Void = {}
     var keyUpAction: () -> Void = {}
-    private var runLoopSource: CFRunLoopSource?
     var currentModifier: NSEvent.ModifierFlags?
     var currentKeyCode: UInt16?
-    static let shared = HotkeyManager()
-    static let meetingShared = HotkeyManager()
+    private let name: KeyboardShortcuts.Name
+    private var isEnabled: Bool = false
 
-    private init() {
+    static let shared = HotkeyManager(shortcutName: .recording)
+    static let meetingShared = HotkeyManager(shortcutName: .meetingRecording)
+
+    private init(shortcutName: KeyboardShortcuts.Name) {
+        self.name = shortcutName
+        KeyboardShortcuts.onKeyDown(for: shortcutName) { [weak self] in self?.action() }
+        KeyboardShortcuts.onKeyUp(for: shortcutName) { [weak self] in self?.keyUpAction() }
     }
 
     func setAction(action: @escaping () -> Void) {
@@ -26,97 +36,35 @@ class HotkeyManager: ObservableObject, HotkeyManaging {
         self.keyUpAction = action
     }
 
-    func setupSystemHotkey(modifier: NSEvent.ModifierFlags, keyCode: UInt16) {
-        // Skip if same hotkey is already active
-        if currentModifier == modifier && currentKeyCode == keyCode {
-            Logger.log("Same hotkey combination already active, skipping setup", log: Logger.hotkey)
+    func updateSystemHotkey(hotkeyEnabled: Bool, modifier: NSEvent.ModifierFlags, keyCode: UInt16) {
+        if currentModifier == modifier && currentKeyCode == keyCode && isEnabled == hotkeyEnabled {
+            Logger.log("Same hotkey combination already active, skipping", log: Logger.hotkey)
             return
         }
-
-        removeSystemHotkey()
-
-        Logger.log("Setting up system hotkey with modifier: \(modifier) and keyCode: \(keyCode)", log: Logger.hotkey)
-
-        // Store current settings
         currentModifier = modifier
         currentKeyCode = keyCode
-
-        let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(mask),
-            callback: hotkeyCallback,
-            userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        )
-
-        if let tap = eventTap {
-            runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-            CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-            CGEvent.tapEnable(tap: tap, enable: true)
-            Logger.log("Event tap installed", log: Logger.hotkey)
-        } else {
-            Logger.log("Failed to install event tap", log: Logger.hotkey, type: .error)
-        }
-    }
-
-    func removeSystemHotkey() {
-        Logger.log("Removing system hotkey", log: Logger.hotkey)
-
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-            if let src = runLoopSource {
-                CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes)
-            }
-            eventTap = nil
-            runLoopSource = nil
-            currentModifier = nil
-            currentKeyCode = nil
-            Logger.log("Event tap removed", log: Logger.hotkey)
-        }
-    }
-
-    func updateSystemHotkey(hotkeyEnabled: Bool, modifier: NSEvent.ModifierFlags, keyCode: UInt16) {
-        Logger.log("Updating hotkey monitor with modifier: \(modifier) and keyCode: \(keyCode)", log: Logger.hotkey)
+        isEnabled = hotkeyEnabled
 
         if hotkeyEnabled {
-            setupSystemHotkey(
-                modifier: modifier,
-                keyCode: keyCode
+            var carbonModifiers = 0
+            if modifier.contains(.control) { carbonModifiers |= controlKey }
+            if modifier.contains(.option)  { carbonModifiers |= optionKey }
+            if modifier.contains(.shift)   { carbonModifiers |= shiftKey }
+            if modifier.contains(.command) { carbonModifiers |= cmdKey }
+            let shortcut = KeyboardShortcuts.Shortcut(
+                carbonKeyCode: Int(keyCode),
+                carbonModifiers: carbonModifiers
             )
+            KeyboardShortcuts.setShortcut(shortcut, for: name)
+            KeyboardShortcuts.enable(name)
+            Logger.log("Hotkey registered for \(name.rawValue): modifier=\(modifier), keyCode=\(keyCode)", log: Logger.hotkey)
         } else {
-            removeSystemHotkey()
+            KeyboardShortcuts.disable(name)
+            Logger.log("Hotkey disabled for \(name.rawValue)", log: Logger.hotkey)
         }
     }
 
     deinit {
-        removeSystemHotkey()
+        KeyboardShortcuts.disable(name)
     }
-}
-
-// Static callback function
-private func hotkeyCallback(proxy: CGEventTapProxy, type: CGEventType, cgEvent: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
-    guard type == .keyDown || type == .keyUp else { return Unmanaged.passUnretained(cgEvent) }
-    guard let refcon = refcon else { return Unmanaged.passUnretained(cgEvent) }
-
-    let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-    let event = NSEvent(cgEvent: cgEvent)
-
-    if let modifier = manager.currentModifier,
-        let keyCode = manager.currentKeyCode,
-        event?.modifierFlags.contains(modifier) == true,
-        event?.keyCode == keyCode {
-            // Run action on main thread
-            DispatchQueue.main.async {
-                if type == .keyDown {
-                    manager.action()
-                } else if type == .keyUp {
-                    manager.keyUpAction()
-                }
-            }
-        return nil  // Swallow the event
-    }
-
-    return Unmanaged.passUnretained(cgEvent)
 }
