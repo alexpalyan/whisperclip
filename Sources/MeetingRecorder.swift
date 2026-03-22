@@ -479,54 +479,6 @@ class MeetingRecorder: NSObject, ObservableObject {
     }
 }
 
-// MARK: - Transcription Queue
-
-/// Serializes transcription requests to prevent concurrent CoreML predictions
-/// which can cause crashes due to thread-safety issues
-private actor TranscriptionQueue {
-    private var isProcessing = false
-    private var pendingRequests: [(AudioSource, [Float], TimeInterval, @MainActor (AudioSource, [Float], TimeInterval) async -> Void)] = []
-    
-    func enqueue(
-        source: AudioSource,
-        samples: [Float],
-        startTime: TimeInterval,
-        processor: @escaping @MainActor (AudioSource, [Float], TimeInterval) async -> Void
-    ) async {
-        if isProcessing {
-            // Queue for later processing
-            pendingRequests.append((source, samples, startTime, processor))
-            return
-        }
-        
-        isProcessing = true
-        await processor(source, samples, startTime)
-        isProcessing = false
-        
-        // Process next in queue if any
-        await processNext()
-    }
-    
-    private func processNext() async {
-        guard !pendingRequests.isEmpty else { return }
-        
-        let (source, samples, startTime, processor) = pendingRequests.removeFirst()
-        isProcessing = true
-        await processor(source, samples, startTime)
-        isProcessing = false
-        
-        // Continue processing queue
-        await processNext()
-    }
-    
-    /// Wait until all in-flight and pending transcription work completes
-    func drain() async {
-        while isProcessing || !pendingRequests.isEmpty {
-            try? await Task.sleep(nanoseconds: 10_000_000)  // 10ms
-        }
-    }
-}
-
 // MARK: - Errors
 
 enum MeetingRecorderError: LocalizedError {
