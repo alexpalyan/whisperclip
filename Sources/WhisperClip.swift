@@ -51,14 +51,6 @@ struct WhisperClip: App {
         }
     }
 
-    private func updateHotkeyMonitor() {
-        hotkeyManager.updateSystemHotkey(
-            hotkeyEnabled: SettingsStore.shared.hotkeyEnabled,
-            modifier: SettingsStore.shared.hotkeyModifier,
-            keyCode: SettingsStore.shared.hotkeyKey
-        )
-    }
-
     @MainActor
     func showNoEnoughDiskSpaceAlert(freeSpace: Int64) -> Bool {
         let alert = NSAlert()
