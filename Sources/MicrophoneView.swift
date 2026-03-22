@@ -228,6 +228,12 @@ struct MicrophoneView: View {
             Logger.log("MicrophoneView appeared", log: Logger.general)
             hotkeyManager.setAction(action: {
                 Logger.log("Hotkey action triggered (keyDown)", log: Logger.hotkey)
+                // Mutual exclusion: if meeting is active, stop it and do NOT start mic
+                if RecordingCoordinator.shared.active == .meeting {
+                    Logger.log("Mic hotkey pressed while meeting active — stopping meeting (no mic start)", log: Logger.hotkey)
+                    Task { @MainActor in await MeetingSession.shared.stopMeeting() }
+                    return
+                }
                 if settings.holdToTalk {
                     if !audio.isRecording && !isProcessing {
                         self.startedByHotkey = true
@@ -306,6 +312,7 @@ struct MicrophoneView: View {
             return
         }
         Logger.log("Starting recording", log: Logger.audio)
+        RecordingCoordinator.shared.didStartMicrophone()
         resetState()
         do {
             try audio.start()
@@ -400,6 +407,7 @@ struct MicrophoneView: View {
         recordingTimer?.invalidate()
         recordingTimer = nil
         audio.reset()
+        RecordingCoordinator.shared.didStop()
     }
 
     private func processText(text: String, source: TranscriptionSource, filename: String? = nil) async {

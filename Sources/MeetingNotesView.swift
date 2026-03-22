@@ -59,9 +59,17 @@ struct MeetingNotesView: View {
     private func setupMeetingHotkey() {
         HotkeyManager.meetingShared.setAction {
             Task { @MainActor in
+                // Mutual exclusion: if mic is active, stop it and do NOT start meeting
+                if RecordingCoordinator.shared.active == .microphone {
+                    Logger.log("Meeting hotkey pressed while mic active — stopping mic (no meeting start)", log: Logger.hotkey)
+                    AudioRecorder.shared.stop()
+                    return
+                }
                 if session.isActive {
                     await session.stopMeeting()
+                    RecordingCoordinator.shared.didStop()
                 } else {
+                    RecordingCoordinator.shared.didStartMeeting()
                     await session.startMeeting()
                 }
             }
