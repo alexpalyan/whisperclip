@@ -22,6 +22,7 @@ class MeetingRecorder: NSObject, ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var activeSpeakers: [String] = ["Me", "Other"]
     @Published private(set) var hasSystemAudioPermission = false
+    @Published private(set) var activeSpeakerLabel: String = ""
     
     // MARK: - Audio Components
 
@@ -29,6 +30,7 @@ class MeetingRecorder: NSObject, ObservableObject {
     private var asrManager: AsrManager?
     private var diarizerManager: DiarizerManager?
     private var speakerBufferManager: SpeakerBufferManager?
+    private var bufferConsumerTask: Task<Void, Never>?
 
     // MARK: - State
 
@@ -115,6 +117,18 @@ class MeetingRecorder: NSObject, ObservableObject {
             let manager = SpeakerBufferManager(diarizer: diarizer, sampleRate: sampleRate)
             speakerBufferManager = manager
             await manager.start()
+            let managerRef = manager
+            bufferConsumerTask = Task { [weak self] in
+                for await buffer in managerRef.buffers {
+                    guard let self = self else { break }
+                    await MainActor.run {
+                        self.activeSpeakerLabel = buffer.speakerLabel
+                    }
+                    await self.transcriptionQueue.enqueue(buffer: buffer) { [weak self] closedBuffer in
+                        await self?.transcribeClosedBuffer(closedBuffer)
+                    }
+                }
+            }
             Logger.log("SpeakerBufferManager started", log: Logger.general)
         }
         
@@ -160,9 +174,7 @@ class MeetingRecorder: NSObject, ObservableObject {
         segmentCount = 0
         lastError = nil
         processedMicTexts = []
-        processedSystemTexts = []
-        speakerLabelMap = [:]
-        nextSpeakerNumber = 1
+        activeSpeakerLabel = ""
         hasSystemAudioPermission = capture.hasScreenCapturePermission
         
         // Start duration timer
@@ -186,22 +198,42 @@ class MeetingRecorder: NSObject, ObservableObject {
         durationTimer?.invalidate()
         durationTimer = nil
         
-        // Stop SpeakerBufferManager (flushes remaining system audio buffers)
+        // === ZERO DATA LOSS TEARDOWN ===
+        // This order is non-negotiable. Rationale:
+        // 1. Stop producer -> flushes remaining open buffer, finishes the AsyncStream
+        // 2. Await consumer -> drains all ClosedSpeakerBuffers emitted by step 1
+        // 3. Stop capture -> returns final mic audio. Safe here because stopCapture()
+        //    only retrieves buffered mic samples; it does not affect the system audio
+        //    pipeline (SpeakerBufferManager already stopped in step 1).
+        // 4. Drain ASR queue -> waits for all in-flight predictions to finish
+        // 5. Process final mic chunk directly
+        // Cancelling the consumer before the producer would silently drop the last speaker turn.
+
+        // Step 1: Stop producer (flushes final buffer)
         if let manager = speakerBufferManager {
             await manager.stop()
             Logger.log("SpeakerBufferManager stopped", log: Logger.general)
         }
 
-        // Stop dual capture and retrieve remaining mic audio
+        // Step 2: Await consumer completion (drains all remaining closed buffers)
+        if let task = bufferConsumerTask {
+            _ = await task.value
+            bufferConsumerTask = nil
+        }
+
+        // Step 3: Stop capture and retrieve remaining mic audio
+        // stopCapture() only retrieves buffered mic samples; it does not affect the
+        // system audio pipeline (SpeakerBufferManager already stopped in step 1).
+        // Placed after consumer completion to avoid any race with system audio callbacks.
         var finalMicAudio: (samples: [Float], startTime: TimeInterval)?
         if let capture = dualCapture {
             finalMicAudio = await capture.stopCapture()
         }
         
-        // Wait for any previously queued transcription work to finish
+        // Step 4: Drain ASR queue (ensures all enqueued transcriptions finish)
         await transcriptionQueue.drain()
         
-        // Process final mic chunk directly (system audio already handled by SpeakerBufferManager)
+        // Step 5: Process final mic chunk directly
         if let micAudio = finalMicAudio, !micAudio.samples.isEmpty {
             await processAudioChunk(
                 source: .microphone,
@@ -224,6 +256,9 @@ class MeetingRecorder: NSObject, ObservableObject {
         durationTimer?.invalidate()
         durationTimer = nil
 
+        bufferConsumerTask?.cancel()
+        bufferConsumerTask = nil
+
         if let manager = speakerBufferManager {
             Task {
                 await manager.stop()
@@ -245,13 +280,12 @@ class MeetingRecorder: NSObject, ObservableObject {
         transcriptCallback = nil
         errorCallback = nil
         processedMicTexts = []
-        processedSystemTexts = []
         asrManager = nil
         diarizerManager = nil
         dualCapture = nil
         speakerBufferManager = nil
-        speakerLabelMap = [:]
-        nextSpeakerNumber = 1
+        bufferConsumerTask = nil
+        activeSpeakerLabel = ""
     }
     
     // MARK: - Duration Timer
@@ -321,10 +355,11 @@ class MeetingRecorder: NSObject, ObservableObject {
                 return
             }
 
-            // Determine speaker via diarization (if available) or fall back to channel attribution
+            // Determine speaker using the capture source. Diarized system audio is handled
+            // upstream by SpeakerBufferManager and transcribeClosedBuffer(_:).
             let chunkDuration = Double(samples.count) / Double(sampleRate)
             let endTime = startTime + chunkDuration
-            let speaker = resolveSpeaker(source: source, samples: samples, chunkStartTime: startTime)
+            let speaker = source.speaker
 
             // Create segment
             let segment = MeetingSegment(
@@ -340,8 +375,6 @@ class MeetingRecorder: NSObject, ObservableObject {
             // Store for deduplication
             if source == .microphone {
                 processedMicTexts.insert(newText)
-            } else {
-                processedSystemTexts.insert(newText)
             }
 
             Logger.log("processAudioChunk: created \(speaker.displayName) segment #\(segmentCount): '\(newText.prefix(50))'", log: Logger.general)
@@ -354,86 +387,73 @@ class MeetingRecorder: NSObject, ObservableObject {
         }
     }
 
-    /// Determines the `Speaker` for a chunk of audio.
-    ///
-    /// Microphone audio always returns `.me` — the local user's identity is known
-    /// from the capture channel and must not be overridden by diarization labels.
-    ///
-    /// For system audio, when `DiarizerManager` is available it runs diarization on
-    /// the raw samples and picks the speaker with the most speech time in the chunk,
-    /// mapping each unique speakerId to a stable human-readable label ("Speaker 1",
-    /// "Speaker 2", …) that persists for the entire recording session.
-    ///
-    /// Falls back to channel-based attribution if the diarizer is unavailable or
-    /// returns no segments.
-    private func resolveSpeaker(source: AudioSource, samples: [Float], chunkStartTime: TimeInterval) -> Speaker {
-        // Microphone is always "Me" — never override with a diarization label.
-        if source == .microphone {
-            return .me
+    private func transcribeClosedBuffer(_ buffer: ClosedSpeakerBuffer) async {
+        guard let asrManager = asrManager else {
+            Logger.log("transcribeClosedBuffer: asrManager not available", log: Logger.general, type: .error)
+            return
         }
 
-        Logger.log("resolveSpeaker: called for system audio chunk, \(samples.count) samples at t=\(String(format: "%.2f", chunkStartTime))s, diarizerManager=\(diarizerManager != nil ? "available" : "nil")", log: Logger.general)
+        let sourceName = "system[\(buffer.speakerLabel)]"
 
-        guard let diarizer = diarizerManager else {
-            Logger.log("resolveSpeaker: no diarizerManager, falling back to channel attribution", log: Logger.general)
-            return source.speaker
+        Logger.log(
+            "transcribeClosedBuffer: processing \(sourceName) with \(buffer.samples.count) samples",
+            log: Logger.general
+        )
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeting_\(sourceName)_\(UUID().uuidString).wav")
+
+        defer {
+            try? FileManager.default.removeItem(at: tempURL)
         }
 
         do {
-            let result = try diarizer.performCompleteDiarization(samples, sampleRate: sampleRate, atTime: chunkStartTime)
+            try writeWAVFile(samples: buffer.samples, to: tempURL)
+            let transcriptionResult = try await asrManager.transcribe(tempURL)
 
-            Logger.log("resolveSpeaker: diarization returned \(result.segments.count) segments", log: Logger.general)
-
-            guard !result.segments.isEmpty else {
-                Logger.log("resolveSpeaker: diarization returned no segments for system audio, falling back to channel attribution", log: Logger.general)
-                return source.speaker
+            guard !transcriptionResult.text.isEmpty else {
+                Logger.log("transcribeClosedBuffer: empty transcription from \(sourceName)", log: Logger.general)
+                return
             }
 
-            // Log all segments for diagnosis
-            for seg in result.segments {
-                Logger.log("resolveSpeaker: segment speakerId='\(seg.speakerId)' duration=\(String(format: "%.2f", seg.durationSeconds))s [\(String(format: "%.2f", seg.startTimeSeconds))s–\(String(format: "%.2f", seg.endTimeSeconds))s]", log: Logger.general)
-            }
+            let normalizedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedText.isEmpty else { return }
 
-            // Pick the speakerId with the most total speech time in this chunk.
-            // Note: speakerIds (e.g. "SPEAKER_00") are stable within a single
-            // performCompleteDiarization call but not guaranteed across calls.
-            // We accumulate the map so that if the same raw ID recurs across chunks
-            // it receives a consistent label. In practice this works because
-            // FluidAudio's SpeakerManager tracks embeddings across calls when using
-            // the same DiarizerManager instance.
-            var durationBySpeaker: [String: Float] = [:]
-            for seg in result.segments {
-                durationBySpeaker[seg.speakerId, default: 0] += seg.durationSeconds
-            }
+            let chunkDuration = Double(buffer.samples.count) / Double(sampleRate)
+            let endTime = buffer.startTime + chunkDuration
+            let segment = MeetingSegment(
+                speaker: .labeled(buffer.speakerLabel),
+                text: normalizedText,
+                startTime: buffer.startTime,
+                endTime: endTime,
+                confidence: 0.95
+            )
 
-            Logger.log("resolveSpeaker: duration by speakerId: \(durationBySpeaker.map { "\($0.key)=\(String(format: "%.2f", $0.value))s" }.sorted().joined(separator: ", "))", log: Logger.general)
+            segmentCount += 1
 
-            guard let dominantId = durationBySpeaker.max(by: { $0.value < $1.value })?.key,
-                  !dominantId.isEmpty else {
-                Logger.log("resolveSpeaker: no dominant speaker found, falling back to channel attribution", log: Logger.general)
-                return source.speaker
-            }
+            Logger.log(
+                "transcribeClosedBuffer: created \(buffer.speakerLabel) segment #\(segmentCount): '\(normalizedText.prefix(50))'",
+                log: Logger.general
+            )
 
-            // Map to stable display label
-            if let label = speakerLabelMap[dominantId] {
-                Logger.log("resolveSpeaker: dominantId='\(dominantId)' → existing label '\(label)' (labelMap=\(speakerLabelMap))", log: Logger.general)
-                return .labeled(label)
-            } else {
-                let label = "Speaker \(nextSpeakerNumber)"
-                speakerLabelMap[dominantId] = label
-                nextSpeakerNumber += 1
-                Logger.log("resolveSpeaker: new system-audio speaker '\(dominantId)' assigned label '\(label)' (labelMap now: \(speakerLabelMap))", log: Logger.general)
-                return .labeled(label)
-            }
+            transcriptCallback?(segment)
         } catch {
-            Logger.log("resolveSpeaker: diarization failed (\(error)), falling back to channel attribution", log: Logger.general, type: .error)
-            return source.speaker
+            Logger.log(
+                "transcribeClosedBuffer: error processing \(sourceName): \(error)",
+                log: Logger.general,
+                type: .error
+            )
+            lastError = error.localizedDescription
         }
     }
     
     /// Extract text that hasn't been seen before for this source
     private func extractNewText(_ fullText: String, for source: AudioSource) -> String {
-        let processedTexts = source == .microphone ? processedMicTexts : processedSystemTexts
+        guard source == .microphone else {
+            return fullText
+        }
+        
+        let processedTexts = processedMicTexts
         
         // If this exact text was already processed, skip
         if processedTexts.contains(fullText) {
