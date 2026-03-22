@@ -31,6 +31,9 @@ class MeetingRecorder: NSObject, ObservableObject {
     private var diarizerManager: DiarizerManager?
     private var speakerBufferManager: SpeakerBufferManager?
     private var bufferConsumerTask: Task<Void, Never>?
+    private var systemFallbackBuffer: [Float] = []
+    private var systemFallbackStartTime: TimeInterval = 0
+    private let systemFallbackChunkDuration: TimeInterval = 5.0
 
     // MARK: - State
 
@@ -154,7 +157,11 @@ class MeetingRecorder: NSObject, ObservableObject {
                 onSystemBatch: { [weak self] samples, time in
                     guard let self = self else { return }
                     Task {
-                        await self.speakerBufferManager?.onAudioBatch(samples, atTime: time)
+                        if let manager = await self.speakerBufferManager {
+                            await manager.onAudioBatch(samples, atTime: time)
+                        } else {
+                            await self.accumulateSystemFallback(samples, atTime: time)
+                        }
                     }
                 }
             )
@@ -169,6 +176,8 @@ class MeetingRecorder: NSObject, ObservableObject {
         segmentCount = 0
         lastError = nil
         processedMicTexts = []
+        systemFallbackBuffer = []
+        systemFallbackStartTime = 0
         activeSpeakerLabel = ""
         hasSystemAudioPermission = capture.hasScreenCapturePermission
         
@@ -214,6 +223,22 @@ class MeetingRecorder: NSObject, ObservableObject {
         if let task = bufferConsumerTask {
             _ = await task.value
             bufferConsumerTask = nil
+        }
+
+        // Step 2b: Flush any remaining system fallback buffer (no-diarizer path)
+        if !systemFallbackBuffer.isEmpty {
+            let remainingChunk = systemFallbackBuffer
+            let remainingStart = systemFallbackStartTime
+            systemFallbackBuffer = []
+            systemFallbackStartTime = 0
+            await transcriptionQueue.enqueue(
+                source: .system,
+                samples: remainingChunk,
+                startTime: remainingStart,
+                processor: { [weak self] src, samp, start in
+                    await self?.processAudioChunk(source: src, samples: samp, startTime: start, isFinal: true)
+                }
+            )
         }
 
         // Step 3: Stop capture and retrieve remaining mic audio
@@ -281,6 +306,8 @@ class MeetingRecorder: NSObject, ObservableObject {
         speakerBufferManager = nil
         bufferConsumerTask = nil
         activeSpeakerLabel = ""
+        systemFallbackBuffer = []
+        systemFallbackStartTime = 0
     }
     
     // MARK: - Duration Timer
@@ -305,7 +332,41 @@ class MeetingRecorder: NSObject, ObservableObject {
     }
     
     // MARK: - Audio Processing
-    
+
+    /// Accumulates system audio samples when no diarizer is available.
+    /// Dispatches fixed 5s chunks through the transcription queue as `.system`.
+    private func accumulateSystemFallback(_ samples: [Float], atTime time: TimeInterval) {
+        if systemFallbackBuffer.isEmpty {
+            systemFallbackStartTime = time
+        }
+
+        systemFallbackBuffer.append(contentsOf: samples)
+
+        let chunkSampleCount = Int(Double(sampleRate) * systemFallbackChunkDuration)
+        while systemFallbackBuffer.count >= chunkSampleCount {
+            let chunk = Array(systemFallbackBuffer.prefix(chunkSampleCount))
+            let chunkStart = systemFallbackStartTime
+            systemFallbackBuffer.removeFirst(chunkSampleCount)
+            if systemFallbackBuffer.isEmpty {
+                systemFallbackStartTime = 0
+            } else {
+                systemFallbackStartTime += Double(chunkSampleCount) / Double(sampleRate)
+            }
+
+            Task { [weak self] in
+                guard let self = self else { return }
+                await self.transcriptionQueue.enqueue(
+                    source: .system,
+                    samples: chunk,
+                    startTime: chunkStart,
+                    processor: { src, samp, start in
+                        await self.processAudioChunk(source: src, samples: samp, startTime: start)
+                    }
+                )
+            }
+        }
+    }
+
     private func processAudioChunk(source: AudioSource, samples: [Float], startTime: TimeInterval, isFinal: Bool = false) async {
         guard let asrManager = asrManager else {
             Logger.log("processAudioChunk: asrManager not available", log: Logger.general, type: .error)
