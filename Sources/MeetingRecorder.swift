@@ -28,6 +28,7 @@ class MeetingRecorder: NSObject, ObservableObject {
     private var dualCapture: DualChannelAudioCapture?
     private var asrManager: AsrManager?
     private var diarizerManager: DiarizerManager?
+    private var speakerBufferManager: SpeakerBufferManager?
 
     // MARK: - State
 
@@ -108,6 +109,14 @@ class MeetingRecorder: NSObject, ObservableObject {
             Logger.log("Diarizer models not downloaded — using channel-based speaker attribution", log: Logger.general)
             diarizerManager = nil
         }
+
+        // Create SpeakerBufferManager if diarizer is available
+        if let diarizer = diarizerManager {
+            let manager = SpeakerBufferManager(diarizer: diarizer, sampleRate: sampleRate)
+            speakerBufferManager = manager
+            await manager.start()
+            Logger.log("SpeakerBufferManager started", log: Logger.general)
+        }
         
         // Create dual channel capture
         dualCapture = DualChannelAudioCapture()
@@ -118,20 +127,28 @@ class MeetingRecorder: NSObject, ObservableObject {
         
         // Start dual channel capture
         do {
-            try await capture.startCapture { [weak self] source, samples, startTime in
-                guard let self = self else { return }
-                // Use transcription queue to serialize CoreML predictions
-                Task {
-                    await self.transcriptionQueue.enqueue(
-                        source: source,
-                        samples: samples,
-                        startTime: startTime,
-                        processor: { src, samp, time in
-                            await self.processAudioChunk(source: src, samples: samp, startTime: time)
-                        }
-                    )
+            try await capture.startCapture(
+                onAudioChunk: { [weak self] source, samples, startTime in
+                    guard let self = self else { return }
+                    // Use transcription queue to serialize CoreML predictions
+                    Task {
+                        await self.transcriptionQueue.enqueue(
+                            source: source,
+                            samples: samples,
+                            startTime: startTime,
+                            processor: { src, samp, time in
+                                await self.processAudioChunk(source: src, samples: samp, startTime: time)
+                            }
+                        )
+                    }
+                },
+                onSystemBatch: { [weak self] samples, time in
+                    guard let self = self else { return }
+                    Task {
+                        await self.speakerBufferManager?.onAudioBatch(samples, atTime: time)
+                    }
                 }
-            }
+            )
         } catch {
             Logger.log("Failed to start dual capture: \(error)", log: Logger.general, type: .error)
             throw MeetingRecorderError.recordingFailed
@@ -169,25 +186,29 @@ class MeetingRecorder: NSObject, ObservableObject {
         durationTimer?.invalidate()
         durationTimer = nil
         
-        // Stop dual capture and retrieve remaining buffered audio
-        var finalAudio: (mic: (samples: [Float], startTime: TimeInterval),
-                         system: (samples: [Float], startTime: TimeInterval))?
+        // Stop SpeakerBufferManager (flushes remaining system audio buffers)
+        if let manager = speakerBufferManager {
+            await manager.stop()
+            Logger.log("SpeakerBufferManager stopped", log: Logger.general)
+        }
+
+        // Stop dual capture and retrieve remaining mic audio
+        var finalMicAudio: (samples: [Float], startTime: TimeInterval)?
         if let capture = dualCapture {
-            finalAudio = await capture.stopCapture()
+            finalMicAudio = await capture.stopCapture()
         }
         
         // Wait for any previously queued transcription work to finish
         await transcriptionQueue.drain()
         
-        // Process final audio chunks directly (awaited, not fire-and-forget)
-        // so the transcription pipeline is still alive
-        if let finalAudio = finalAudio {
-            if !finalAudio.mic.samples.isEmpty {
-                await processAudioChunk(source: .microphone, samples: finalAudio.mic.samples, startTime: finalAudio.mic.startTime, isFinal: true)
-            }
-            if !finalAudio.system.samples.isEmpty {
-                await processAudioChunk(source: .system, samples: finalAudio.system.samples, startTime: finalAudio.system.startTime, isFinal: true)
-            }
+        // Process final mic chunk directly (system audio already handled by SpeakerBufferManager)
+        if let micAudio = finalMicAudio, !micAudio.samples.isEmpty {
+            await processAudioChunk(
+                source: .microphone,
+                samples: micAudio.samples,
+                startTime: micAudio.startTime,
+                isFinal: true
+            )
         }
         
         isRecording = false
@@ -202,6 +223,12 @@ class MeetingRecorder: NSObject, ObservableObject {
     func cancelRecording() {
         durationTimer?.invalidate()
         durationTimer = nil
+
+        if let manager = speakerBufferManager {
+            Task {
+                await manager.stop()
+            }
+        }
         
         if let capture = dualCapture {
             Task {
@@ -222,6 +249,7 @@ class MeetingRecorder: NSObject, ObservableObject {
         asrManager = nil
         diarizerManager = nil
         dualCapture = nil
+        speakerBufferManager = nil
         speakerLabelMap = [:]
         nextSpeakerNumber = 1
     }
