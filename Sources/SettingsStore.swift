@@ -7,6 +7,7 @@ struct DefaultSettings {
     static let hasCompletedOnboarding = false
     static let language = "auto"
     static let sttEngine = STTEngine.parakeet
+    static let autoPasteEnabled = false
     static let autoEnter = false
     static let startMinimized = false
     static let displayRecordingOverlay = false
@@ -51,6 +52,7 @@ class SettingsStore: ObservableObject {
         case hasCompletedOnboarding = "hasCompletedOnboarding"
         case language = "language"
         case sttEngine = "sttEngine"
+        case autoPasteEnabled = "autoPasteEnabled"
         case autoEnter = "autoEnter"
         case startMinimized = "startMinimized"
         case displayRecordingOverlay = "displayRecordingOverlay"
@@ -95,6 +97,12 @@ class SettingsStore: ObservableObject {
     @Published var sttEngine: STTEngine = DefaultSettings.sttEngine {
         didSet {
             defaults.set(sttEngine.rawValue, forKey: Keys.sttEngine.rawValue)
+        }
+    }
+
+    @Published var autoPasteEnabled: Bool = DefaultSettings.autoPasteEnabled {
+        didSet {
+            defaults.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled.rawValue)
         }
     }
 
@@ -243,6 +251,10 @@ class SettingsStore: ObservableObject {
         return prompt.content
     }
 
+    func saveContext() {
+        try? modelContext.save()
+    }
+
     init(defaults: UserDefaults = .standard, container: ModelContainer? = nil) {
         self.defaults = defaults
         let resolvedContainer = container ?? SettingsDataContainer.create()
@@ -262,6 +274,7 @@ class SettingsStore: ObservableObject {
         } else {
             self.sttEngine = DefaultSettings.sttEngine
         }
+        self.autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled.rawValue) == nil ? DefaultSettings.autoPasteEnabled : defaults.bool(forKey: Keys.autoPasteEnabled.rawValue)
         self.autoEnter = defaults.object(forKey: Keys.autoEnter.rawValue) == nil ? DefaultSettings.autoEnter : defaults.bool(forKey: Keys.autoEnter.rawValue)
         self.startMinimized = defaults.object(forKey: Keys.startMinimized.rawValue) == nil ? DefaultSettings.startMinimized : defaults.bool(forKey: Keys.startMinimized.rawValue)
         self.displayRecordingOverlay = defaults.object(forKey: Keys.displayRecordingOverlay.rawValue) == nil ? DefaultSettings.displayRecordingOverlay : defaults.bool(forKey: Keys.displayRecordingOverlay.rawValue)

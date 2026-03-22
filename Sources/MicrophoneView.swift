@@ -417,14 +417,14 @@ struct MicrophoneView: View {
         }
 
         GenericHelper.copyToClipboard(text: text)
-        let pasted = GenericHelper.paste(text: text)
-        
+        let pasted = settings.autoPasteEnabled && GenericHelper.paste(text: text)
+
         if pasted && settings.autoEnter {
             _ = GenericHelper.sendEnter()
         }
 
         self.resultText = text
-        self.statusMessage = "✓ Copied to clipboard \(pasted ? "✓ Auto pasted" : "")\(pasted && settings.autoEnter ? " ✓ Auto enter" : "")"
+        self.statusMessage = "✓ Copied to clipboard\(pasted ? " ✓ Auto pasted" : "")\(pasted && settings.autoEnter ? " ✓ Auto enter" : "")"
         self.errorMessage = ""
         
         // Save to history

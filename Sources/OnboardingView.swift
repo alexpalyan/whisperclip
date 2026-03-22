@@ -330,23 +330,6 @@ struct OnboardingView: View {
             progressBar: true
         ),
         OnboardingStep(
-            title: "Accessibility Permission",
-            description: """
-            Required for:
-            • Keyboard shortcuts
-
-            Click "Request Access" to prompt for accessibility permission.
-            """,
-            imageName: "lock.shield.fill",
-            buttonText: "Request Access",
-            action: { progress in
-                SecurityChecker.shared.requestAccessibilityPermission()
-            },
-            skipCondition: {
-                SecurityChecker.shared.checkAccessibilityPermission().isGranted
-            }
-        ),
-        OnboardingStep(
             title: "Microphone Access",
             description: """
             Required for:
@@ -361,23 +344,6 @@ struct OnboardingView: View {
             },
             skipCondition: {
                 SecurityChecker.shared.checkMicrophonePermission().isGranted
-            }
-        ),
-        OnboardingStep(
-            title: "Apple Events Permission",
-            description: """
-            Required for:
-            • Auto-pasting text
-
-            Click "Request Access" to prompt for Apple Events permission.
-            """,
-            imageName: "keyboard",
-            buttonText: "Request Access",
-            action: { progress in
-                SecurityChecker.shared.requestAppleEventsPermission()
-            },
-            skipCondition: {
-                SecurityChecker.shared.checkAppleEventsPermission().isGranted
             }
         ),
         OnboardingStep(

@@ -11,7 +11,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     private var statusItem: NSStatusItem?
     private var mainWindow: NSWindow?
-    var shouldReallyQuit = false
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -67,18 +66,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
-    
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if shouldReallyQuit {
-            return .terminateNow
-        }
-        // Cmd-Q hides instead of quitting; use tray menu Quit to actually quit
-        hideApp()
-        return .terminateCancel
-    }
-    
+
     func applicationWillTerminate(_ notification: Notification) {
         Logger.log("Application will terminate", log: Logger.general)
+        AudioRecorder.shared.stop()
+        MeetingRecorder.shared.cancelRecording()
+        SettingsStore.shared.saveContext()
     }
 
     private func setupMainWindowDelegate() {
@@ -134,7 +127,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func quitApp() {
-        shouldReallyQuit = true
         NSApplication.shared.terminate(nil)
     }
 
@@ -158,19 +150,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func setupSignalHandlers() {
         // Handle SIGINT (Ctrl+C)
         let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-        sigintSource.setEventHandler { [weak self] in
+        sigintSource.setEventHandler {
             Logger.log("Received SIGINT (Ctrl+C)", log: Logger.general)
-            self?.shouldReallyQuit = true
             NSApplication.shared.terminate(nil)
         }
         sigintSource.resume()
         signalSources.append(sigintSource)
-        
+
         // Handle SIGTERM
         let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        sigtermSource.setEventHandler { [weak self] in
+        sigtermSource.setEventHandler {
             Logger.log("Received SIGTERM", log: Logger.general)
-            self?.shouldReallyQuit = true
             NSApplication.shared.terminate(nil)
         }
         sigtermSource.resume()

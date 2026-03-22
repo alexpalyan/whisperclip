@@ -92,11 +92,11 @@ class MeetingRecorder: NSObject, ObservableObject {
         if ModelStorage.shared.diarizerModelsExist() {
             do {
                 let diarizerModels = try await DiarizerModels.load()
-                // clusteringThreshold=0.4 → speakerThreshold=0.48 (strict enough to distinguish
-                // different human voices, whose typical cosine distance is 0.3–0.6).
-                // DiarizerConfig.default uses 0.7 → speakerThreshold=0.84, which is too permissive
-                // and collapses all speakers into one.
-                let diarizer = DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.4))
+                // clusteringThreshold=0.3 → speakerThreshold=0.36 (lower than 0.4→0.48 which still
+                // collapsed all speakers into one — logs showed single "Created new speaker 1" with
+                // no second speaker ever created across an entire multi-person meeting).
+                // DiarizerConfig.default uses 0.7 → speakerThreshold=0.84, way too permissive.
+                let diarizer = DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.3))
                 diarizer.initialize(models: diarizerModels)
                 diarizerManager = diarizer
                 Logger.log("DiarizerManager initialized successfully", log: Logger.general)

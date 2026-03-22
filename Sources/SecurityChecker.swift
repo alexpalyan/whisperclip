@@ -5,9 +5,7 @@ import AppKit
 import Combine
 
 enum SecurityPermission {
-    case accessibility
     case microphone
-    case appleEvents
 }
 
 struct PermissionStatus {
@@ -19,41 +17,17 @@ class SecurityChecker: ObservableObject {
     static let shared = SecurityChecker()
     
     @Published var microphonePermissionGranted: Bool = false
-    @Published var accessibilityPermissionGranted: Bool = false
-    @Published var appleEventsPermissionGranted: Bool = false
-    
+
     private init() {
         updateAllPermissions()
     }
 
-    
     func updateAllPermissions() {
         microphonePermissionGranted = checkMicrophonePermission().isGranted
-        accessibilityPermissionGranted = checkAccessibilityPermission().isGranted
-        appleEventsPermissionGranted = checkAppleEventsPermission().isGranted
     }
-    
+
     func checkAllPermissions() -> [SecurityPermission: PermissionStatus] {
-        var statuses: [SecurityPermission: PermissionStatus] = [:]
-        
-        statuses[.accessibility] = checkAccessibilityPermission()
-        statuses[.microphone] = checkMicrophonePermission()
-        statuses[.appleEvents] = checkAppleEventsPermission()
-        
-        return statuses
-    }
-    
-    func checkAccessibilityPermission() -> PermissionStatus {
-        let options = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false
-        ] as CFDictionary
-        
-        let isTrusted = AXIsProcessTrustedWithOptions(options)
-        
-        return PermissionStatus(
-            isGranted: isTrusted,
-            message: isTrusted ? "Accessibility permission granted" : "Accessibility permission required"
-        )
+        return [.microphone: checkMicrophonePermission()]
     }
     
     func checkMicrophonePermission() -> PermissionStatus {
@@ -95,23 +69,6 @@ class SecurityChecker: ObservableObject {
         return statuses
             .filter { !$0.value.isGranted }
             .map { $0.value.message }
-    }
-
-    func requestAccessibilityPermission() {
-        Logger.log("Requesting Accessibility permission", log: Logger.general)
-        let options = [
-            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
-        ] as CFDictionary
-        let trusted = AXIsProcessTrustedWithOptions(options)
-        if trusted {
-            Logger.log("Accessibility permission granted", log: Logger.general)
-        } else {
-            Logger.log("Accessibility permission denied", log: Logger.general)
-        }
-        // Update the published property to trigger UI refresh
-        DispatchQueue.main.async {
-            self.updateAllPermissions()
-        }
     }
 
     func requestMicrophonePermission() {

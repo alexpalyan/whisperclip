@@ -4,8 +4,6 @@ import SwiftUI
 struct WhisperClip: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @Environment(\.openSettings) private var openSettings
-    @State private var showPermissionAlert = false
-    @State private var missingPermissions: [String] = []
     @StateObject private var hotkeyManager = HotkeyManager.shared
     @State private var activeSheet: ActiveSheet?
 
@@ -74,11 +72,6 @@ struct WhisperClip: App {
                         NSApp.setActivationPolicy(.regular)
                         NSApp.activate(ignoringOtherApps: true)
                         setActiveSheet(sheet: .onboarding)
-                    } else if !SecurityChecker.shared.areAllPermissionsGranted() {
-                        NSApp.setActivationPolicy(.regular)
-                        NSApp.activate(ignoringOtherApps: true)
-                        missingPermissions = SecurityChecker.shared.getMissingPermissions()
-                        showPermissionAlert = true
                     } else if SettingsStore.shared.startMinimized {
                         // Hide immediately — window was created but never shown to user
                         (NSApp.delegate as? AppDelegate)?.hideApp()
@@ -86,18 +79,6 @@ struct WhisperClip: App {
                         NSApp.setActivationPolicy(.regular)
                         NSApp.activate(ignoringOtherApps: true)
                     }
-                }
-                .alert("Required Permissions", isPresented: $showPermissionAlert) {
-                    Button("Open Setup Guide") {
-                        showPermissionAlert = false
-                        SettingsStore.shared.hasCompletedOnboarding = false
-                        setActiveSheet(sheet: .onboarding)
-                    }
-                    Button("Later") {
-                        showPermissionAlert = false
-                    }
-                } message: {
-                    Text("The following permissions are required for the app to function properly:\n\n" + missingPermissions.joined(separator: "\n") + "\n\nWould you like to open the setup guide to configure these permissions?")
                 }
                 .sheet(item: $activeSheet) { sheet in
                     switch sheet {

@@ -16,20 +16,34 @@ struct GeneralSettingsView: View {
 
                 GroupBox {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Auto Actions")
+                        Text("Post-processing")
                             .font(.headline)
                             .foregroundColor(.white)
 
-                        Toggle("Auto-press Enter after paste", isOn: Binding(
-                            get: { settings.autoEnter },
+                        Toggle("Auto-paste into active app", isOn: Binding(
+                            get: { settings.autoPasteEnabled },
                             set: { newValue in
-                                settings.autoEnter = newValue
+                                settings.autoPasteEnabled = newValue
+                                if newValue {
+                                    SecurityChecker.shared.requestAppleEventsPermission()
+                                }
                             }
                         ))
 
-                        Text("Automatically press Enter after pasting transcribed text into the active application.")
+                        Text("Automatically paste transcribed text into the frontmost application. Requires Automation permission.")
                             .font(.caption)
                             .foregroundColor(.gray)
+
+                        if settings.autoPasteEnabled {
+                            Toggle("Auto-press Enter after paste", isOn: Binding(
+                                get: { settings.autoEnter },
+                                set: { settings.autoEnter = $0 }
+                            ))
+
+                            Text("Automatically press Enter after pasting.")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
                     }
                     .padding()
                 }
