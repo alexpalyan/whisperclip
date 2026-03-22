@@ -1,5 +1,6 @@
 import XCTest
 import Cocoa
+import SwiftData
 @testable import WhisperClip
 
 struct NullHotkeyManager: HotkeyManaging {
@@ -16,7 +17,8 @@ final class HotkeySettingsViewModelTests: XCTestCase {
         super.setUp()
         testDefaults = UserDefaults(suiteName: "com.whisperclip.tests.hotkey")!
         testDefaults.removePersistentDomain(forName: "com.whisperclip.tests.hotkey")
-        store = SettingsStore(defaults: testDefaults)
+        let inMemoryContainer = SettingsDataContainer.create(inMemory: true)
+        store = SettingsStore(defaults: testDefaults, container: inMemoryContainer)
         vm = HotkeySettingsViewModel(
             store: store,
             hotkeyManager: NullHotkeyManager(),

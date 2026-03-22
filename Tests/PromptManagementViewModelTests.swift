@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import WhisperClip
 
 @MainActor
@@ -11,7 +12,8 @@ final class PromptManagementViewModelTests: XCTestCase {
         super.setUp()
         testDefaults = UserDefaults(suiteName: "com.whisperclip.tests.prompt-management")!
         testDefaults.removePersistentDomain(forName: "com.whisperclip.tests.prompt-management")
-        store = SettingsStore(defaults: testDefaults)
+        let inMemoryContainer = SettingsDataContainer.create(inMemory: true)
+        store = SettingsStore(defaults: testDefaults, container: inMemoryContainer)
         vm = PromptManagementViewModel(store: store)
     }
 

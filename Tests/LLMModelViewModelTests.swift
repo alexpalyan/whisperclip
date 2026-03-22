@@ -1,4 +1,5 @@
 import XCTest
+import SwiftData
 @testable import WhisperClip
 
 @MainActor
@@ -11,7 +12,8 @@ final class LLMModelViewModelTests: XCTestCase {
         super.setUp()
         testDefaults = UserDefaults(suiteName: "com.whisperclip.tests.llm-model")!
         testDefaults.removePersistentDomain(forName: "com.whisperclip.tests.llm-model")
-        store = SettingsStore(defaults: testDefaults)
+        let inMemoryContainer = SettingsDataContainer.create(inMemory: true)
+        store = SettingsStore(defaults: testDefaults, container: inMemoryContainer)
         vm = LLMModelViewModel(store: store)
     }
 
