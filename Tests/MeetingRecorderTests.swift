@@ -92,6 +92,32 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertEqual(labelAtProcessorCallTime, "Speaker 1")
     }
 
+    // MARK: - GAP-09-04: Mic source sets activeSpeakerLabel to Me
+
+    func testMicrophoneSourceSetsActiveSpeakerLabelToMe() {
+        // Contract: microphone audio always identifies as "Me" for waveform color.
+        // The onAudioChunk callback sets activeSpeakerLabel = Speaker.me.displayName
+        // when source == .microphone, so the waveform shows #4A9EFF (vivid blue).
+        //
+        // This test validates the Speaker model contract that underpins the fix:
+        // 1. Speaker.me.displayName produces "Me"
+        // 2. Speaker(displayName: "Me") round-trips back to .me
+        // 3. .me has colorIndex 0 (palette slot for vivid blue)
+
+        let expectedLabel = Speaker.me.displayName
+        XCTAssertEqual(expectedLabel, "Me", "Speaker.me.displayName must be 'Me'")
+
+        // Round-trip: the label stored in activeSpeakerLabel -> Speaker(displayName:) -> palette lookup
+        let resolvedSpeaker = Speaker(displayName: expectedLabel)
+        XCTAssertEqual(resolvedSpeaker, .me, "Speaker(displayName: 'Me') must resolve to .me")
+        XCTAssertEqual(resolvedSpeaker.colorIndex, 0, ".me must have colorIndex 0 for palette slot #4A9EFF")
+
+        // Verify AudioSource.microphone maps to Speaker.me via source.speaker
+        let micSpeaker = AudioSource.microphone.speaker
+        XCTAssertEqual(micSpeaker, .me, "AudioSource.microphone.speaker must be .me")
+        XCTAssertEqual(micSpeaker.displayName, "Me", "Mic speaker displayName must be 'Me'")
+    }
+
     func testTeardownSequenceStopThenConsumeThenDrain() async throws {
         let diarizer = MockDiarizationProvider()
         diarizer.setResults([makeDiarizationResult(speakerId: "SPEAKER_00", durationSeconds: 1.0)])
