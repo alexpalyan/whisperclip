@@ -89,46 +89,11 @@ class MeetingRecorder: NSObject, ObservableObject {
             throw MeetingRecorderError.modelLoadFailed(error.localizedDescription)
         }
 
-        // Initialize diarizer (optional — falls back to channel-based attribution if unavailable)
-        if ModelStorage.shared.diarizerModelsExist() {
-            do {
-                let diarizerModels = try await DiarizerModels.load()
-                // clusteringThreshold=0.3 → speakerThreshold=0.36 (lower than 0.4→0.48 which still
-                // collapsed all speakers into one — logs showed single "Created new speaker 1" with
-                // no second speaker ever created across an entire multi-person meeting).
-                // DiarizerConfig.default uses 0.7 → speakerThreshold=0.84, way too permissive.
-                let diarizer = DiarizerManager(config: DiarizerConfig(clusteringThreshold: 0.3))
-                diarizer.initialize(models: diarizerModels)
-                diarizerManager = diarizer
-                Logger.log("DiarizerManager initialized successfully", log: Logger.general)
-            } catch {
-                Logger.log("Failed to load diarizer models (will use channel-based speaker attribution): \(error)", log: Logger.general, type: .error)
-                diarizerManager = nil
-            }
-        } else {
-            Logger.log("Diarizer models not downloaded — using channel-based speaker attribution", log: Logger.general)
-            diarizerManager = nil
-        }
-
-        // Create SpeakerBufferManager if diarizer is available
-        if let diarizer = diarizerManager {
-            let manager = SpeakerBufferManager(diarizer: diarizer, sampleRate: sampleRate)
-            speakerBufferManager = manager
-            await manager.start()
-            let managerRef = manager
-            bufferConsumerTask = Task { [weak self] in
-                for await buffer in managerRef.buffers {
-                    guard let self = self else { break }
-                    await MainActor.run {
-                        self.activeSpeakerLabel = buffer.speakerLabel
-                    }
-                    await self.transcriptionQueue.enqueue(buffer: buffer) { [weak self] closedBuffer in
-                        await self?.transcribeClosedBuffer(closedBuffer)
-                    }
-                }
-            }
-            Logger.log("SpeakerBufferManager started", log: Logger.general)
-        }
+        // Diarization pipeline is intentionally disabled for stable, low-latency streaming.
+        diarizerManager = nil
+        speakerBufferManager = nil
+        bufferConsumerTask = nil
+        Logger.log("Diarization disabled: using continuous source-based transcription stream", log: Logger.general)
         
         // Create dual channel capture
         dualCapture = DualChannelAudioCapture()
@@ -142,11 +107,9 @@ class MeetingRecorder: NSObject, ObservableObject {
             try await capture.startCapture(
                 onAudioChunk: { [weak self] source, samples, startTime in
                     guard let self = self else { return }
-                    // Mic channel is always "Me" — set label immediately for waveform color
-                    if source == .microphone {
-                        Task { @MainActor in
-                            self.activeSpeakerLabel = Speaker.me.displayName
-                        }
+                    // Mic channel is always "Me"; other callback sources remain unknown/empty.
+                    Task { @MainActor in
+                        self.activeSpeakerLabel = source == .microphone ? Speaker.me.displayName : ""
                     }
                     // Use transcription queue to serialize CoreML predictions
                     Task {
@@ -163,11 +126,10 @@ class MeetingRecorder: NSObject, ObservableObject {
                 onSystemBatch: { [weak self] samples, time in
                     guard let self = self else { return }
                     Task {
-                        if let manager = await self.speakerBufferManager {
-                            await manager.onAudioBatch(samples, atTime: time)
-                        } else {
-                            await self.accumulateSystemFallback(samples, atTime: time)
+                        await MainActor.run {
+                            self.activeSpeakerLabel = ""
                         }
+                        await self.accumulateSystemFallback(samples, atTime: time)
                     }
                 }
             )
