@@ -7,15 +7,15 @@ import SwiftUI
 /// `.labeled` speakers cycle through a palette of distinct colours.
 func speakerPaletteColor(_ speaker: Speaker) -> Color {
     let palette: [Color] = [
-        .blue,      // 0 – Me
-        .purple,    // 1 – Other (legacy)
-        .teal,      // 2 – Speaker 1
-        .orange,    // 3 – Speaker 2
-        .pink,      // 4 – Speaker 3
-        .green,     // 5 – Speaker 4
-        .yellow,    // 6 – Speaker 5
-        .red,       // 7 – Speaker 6
-        .indigo,    // 8 – Speaker 7
+        Color(hex: "#4A9EFF"),  // 0 - Me: vivid blue
+        Color(hex: "#9C27B0"),  // 1 - Other (legacy): purple
+        Color(hex: "#00C896"),  // 2 - Speaker 1: emerald
+        Color(hex: "#FF7A00"),  // 3 - Speaker 2: vivid orange
+        Color(hex: "#E040FB"),  // 4 - Speaker 3: vivid purple
+        Color(hex: "#00BCD4"),  // 5 - Speaker 4: cyan
+        Color(hex: "#FF4081"),  // 6 - Speaker 5: pink
+        Color(hex: "#69F0AE"),  // 7 - Speaker 6: mint
+        Color(hex: "#FF6E40"),  // 8 - Speaker 7: deep orange
     ]
     if speaker == .unknown { return .gray }
     let index = speaker.colorIndex
