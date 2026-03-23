@@ -37,6 +37,16 @@ enum Speaker: Codable, Hashable {
         }
     }
 
+    /// Converts a display-name string (e.g. from `activeSpeakerLabel`) back to a `Speaker` value.
+    init(displayName: String) {
+        switch displayName {
+        case "Me":      self = .me
+        case "Other":   self = .other
+        case "Unknown", "": self = .unknown
+        default:        self = .labeled(displayName)
+        }
+    }
+
     func encode(to encoder: Encoder) throws {
         switch self {
         case .me:
