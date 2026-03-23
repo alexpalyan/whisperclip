@@ -1,88 +1,76 @@
 import SwiftUI
 
-/// Animated waveform visualization for meeting recording
+/// High-performance waveform using TimelineView to guarantee redraws
+/// even when the main thread is heavily loaded by AI models.
 struct MeetingWaveformView: View {
     @ObservedObject var recorder: MeetingRecorder
 
     private struct WaveformPoint {
         let level: Float
-        let speakerLabel: String
+        let label: String
     }
 
-    /// Noise floor in dB. Levels at or below this render at minimum bar height.
-    private let noiseFloor: Float = -50
-    /// Minimum bar height in points. Bars at or below the noise floor render at this height.
-    private let minBarHeight: CGFloat = 4
-
-    @State private var points: [WaveformPoint] = Array(
-        repeating: WaveformPoint(level: 0, speakerLabel: ""),
-        count: 250
-    )
-    private let maxSamples = 250
-    private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    private let maxSamples = 120
+    @State private var points: [WaveformPoint] = Array(repeating: WaveformPoint(level: 0, label: ""), count: 120)
 
     var body: some View {
-        Canvas { context, size in
-            let spacing: CGFloat = 1
-            let barWidth: CGFloat = 2
+        // TimelineView forces updates at a consistent frequency (10Hz)
+        TimelineView(.animation(minimumInterval: 0.1)) { timeline in
+            Canvas { context, size in
+                let spacing: CGFloat = 2
+                let barWidth = (size.width - CGFloat(maxSamples - 1) * spacing) / CGFloat(maxSamples)
 
-            for index in 0..<points.count {
-                let point = points[index]
-                let level = point.level
-                let label = point.speakerLabel
-                let speaker = Speaker(displayName: label)
-                let color: Color
-                if label.isEmpty || speaker == .unknown {
-                    color = Color.gray.opacity(0.3)
-                } else {
-                    color = speakerPaletteColor(speaker)
+                for i in 0..<maxSamples {
+                    let point = points[i]
+                    let x = CGFloat(i) * (barWidth + spacing)
+                    
+                    let normalized = CGFloat(sqrt(point.level))
+                    let height = max(4, min(size.height, normalized * size.height * 1.5))
+                    
+                    let color: Color
+                    if point.level > 0.005 {
+                        if point.label == "Me" {
+                            color = .blue
+                        } else if point.label.isEmpty {
+                            color = .blue.opacity(0.6)
+                        } else {
+                            color = speakerPaletteColor(Speaker(displayName: point.label))
+                        }
+                    } else {
+                        color = Color.gray.opacity(0.2)
+                    }
+
+                    let y = (size.height - height) / 2
+                    let rect = CGRect(x: x, y: y, width: barWidth, height: height)
+                    context.fill(RoundedRectangle(cornerRadius: 1).path(in: rect), with: .color(color))
                 }
-
-                let levelDB = 20 * log10(max(level, 1e-7))
-                let normalized = max(0, min(1, (levelDB - noiseFloor) / (0 - noiseFloor)))
-                let height = max(minBarHeight, CGFloat(normalized) * size.height)
-                let x = CGFloat(index) * (barWidth + spacing)
-                let y = (size.height - height) / 2
-
-                let rect = CGRect(x: x, y: y, width: barWidth, height: height)
-                let path = RoundedRectangle(cornerRadius: 2).path(in: rect)
-                context.fill(path, with: .color(color))
             }
-        }
-        .onReceive(timer) { _ in
-            updateLevels()
+            .onChange(of: timeline.date) { _, _ in
+                // We update the buffer every time the timeline "ticks"
+                if recorder.isRecording {
+                    updateBuffer()
+                }
+            }
         }
         .onChange(of: recorder.isRecording) { _, isRecording in
             if isRecording {
-                points = Array(
-                    repeating: WaveformPoint(level: 0, speakerLabel: ""),
-                    count: maxSamples
-                )
+                points = Array(repeating: WaveformPoint(level: 0, label: ""), count: maxSamples)
             }
         }
     }
 
-    private func updateLevels() {
-        guard recorder.isRecording else {
-            if points.allSatisfy({ $0.level < 0.001 }) || points.count < maxSamples {
-                points = (0..<maxSamples).map { i in
-                    WaveformPoint(
-                        level: Float(sin(Double(i) * 0.3)) * 0.1 + 0.1,
-                        speakerLabel: ""
-                    )
-                }
-            }
-            return
+    private func updateBuffer() {
+        let newPoint = WaveformPoint(
+            level: recorder.normalizedLevel,
+            label: recorder.activeSpeakerLabel
+        )
+        
+        var nextPoints = points
+        nextPoints.append(newPoint)
+        if nextPoints.count > maxSamples {
+            nextPoints.removeFirst()
         }
-
-        let newLevel = recorder.normalizedLevel
-        let currentSpeaker = recorder.activeSpeakerLabel
-
-        points.append(WaveformPoint(level: newLevel, speakerLabel: currentSpeaker))
-
-        if points.count > maxSamples {
-            points.removeFirst()
-        }
+        points = nextPoints
     }
 }
 
@@ -90,12 +78,11 @@ struct MeetingWaveformView: View {
 struct AudioLevelIndicator: View {
     let level: Float
     let isActive: Bool
-    
+
     @State private var pulseAnimation = false
-    
+
     var body: some View {
         ZStack {
-            // Outer pulse rings when active
             if isActive {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
@@ -111,13 +98,11 @@ struct AudioLevelIndicator: View {
                         )
                 }
             }
-            
-            // Background circle
+
             Circle()
                 .fill(Color.teal.opacity(0.1))
                 .frame(width: 70, height: 70)
-            
-            // Level indicator
+
             Circle()
                 .fill(
                     LinearGradient(
@@ -128,8 +113,7 @@ struct AudioLevelIndicator: View {
                 )
                 .frame(width: 60 * CGFloat(max(0.2, level)), height: 60 * CGFloat(max(0.2, level)))
                 .animation(.easeOut(duration: 0.1), value: level)
-            
-            // Mic icon
+
             Image(systemName: isActive ? "waveform" : "mic.fill")
                 .font(.system(size: isActive ? 24 : 20, weight: .semibold))
                 .foregroundColor(.white)
@@ -144,7 +128,7 @@ struct AudioLevelIndicator: View {
             pulseAnimation = newValue
         }
     }
-    
+
     private var levelColors: [Color] {
         if level > 0.7 {
             return [.red, .orange]
@@ -159,7 +143,7 @@ struct AudioLevelIndicator: View {
 /// Meeting status indicator badge
 struct MeetingStatusBadge: View {
     let status: MeetingSession.SessionStatus
-    
+
     var body: some View {
         HStack(spacing: 6) {
             if status.isActive {
@@ -168,7 +152,7 @@ struct MeetingStatusBadge: View {
                     .frame(width: 8, height: 8)
                     .modifier(PulseModifier(isAnimating: status == .recording))
             }
-            
+
             Text(status.rawValue)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(statusColor)
@@ -178,7 +162,7 @@ struct MeetingStatusBadge: View {
         .background(statusColor.opacity(0.15))
         .cornerRadius(8)
     }
-    
+
     private var statusColor: Color {
         switch status {
         case .idle: return .gray
@@ -196,7 +180,7 @@ struct MeetingStatusBadge: View {
 struct PulseModifier: ViewModifier {
     let isAnimating: Bool
     @State private var scale: CGFloat = 1.0
-    
+
     func body(content: Content) -> some View {
         content
             .scaleEffect(scale)
@@ -224,7 +208,7 @@ struct PulseModifier: ViewModifier {
 /// Speaker indicator for live transcript
 struct SpeakerBadge: View {
     let speaker: Speaker
-    
+
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: speaker.icon)
@@ -238,7 +222,7 @@ struct SpeakerBadge: View {
         .background(speakerColor.opacity(0.15))
         .cornerRadius(6)
     }
-    
+
     private var speakerColor: Color {
         speakerPaletteColor(speaker)
     }
@@ -247,10 +231,10 @@ struct SpeakerBadge: View {
 /// Meeting duration timer view
 struct MeetingTimerView: View {
     let startTime: Date
-    
+
     @State private var elapsedTime: TimeInterval = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    
+
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "clock")
@@ -266,13 +250,13 @@ struct MeetingTimerView: View {
             elapsedTime = Date().timeIntervalSince(startTime)
         }
     }
-    
+
     private var formattedTime: String {
         let totalSeconds = Int(elapsedTime)
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
-        
+
         if hours > 0 {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
         } else {
