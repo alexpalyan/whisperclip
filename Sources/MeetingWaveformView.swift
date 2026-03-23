@@ -11,6 +11,8 @@ struct MeetingWaveformView: View {
     }
 
     private let maxSamples = 120
+    private let noiseFloor: Float = -50
+    private let minBarHeight: CGFloat = 2
     @State private var points: [WaveformPoint] = Array(repeating: WaveformPoint(level: 0, label: ""), count: 120)
 
     var body: some View {
@@ -23,19 +25,15 @@ struct MeetingWaveformView: View {
                 for i in 0..<maxSamples {
                     let point = points[i]
                     let x = CGFloat(i) * (barWidth + spacing)
-                    
-                    let normalized = CGFloat(sqrt(point.level))
-                    let height = max(4, min(size.height, normalized * size.height * 1.5))
-                    
+
+                    // dB noise floor normalization
+                    let levelDB = 20 * log10(max(point.level, 1e-7))
+                    let normalized = CGFloat(max(0, min(1, (levelDB - noiseFloor) / (0 - noiseFloor))))
+                    let height = max(minBarHeight, normalized * size.height)
+
                     let color: Color
                     if point.level > 0.005 {
-                        if point.label == "Me" {
-                            color = .blue
-                        } else if point.label.isEmpty {
-                            color = .blue.opacity(0.6)
-                        } else {
-                            color = speakerPaletteColor(Speaker(displayName: point.label))
-                        }
+                        color = speakerPaletteColor(Speaker(displayName: point.label))
                     } else {
                         color = Color.gray.opacity(0.2)
                     }
