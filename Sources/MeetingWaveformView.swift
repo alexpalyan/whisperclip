@@ -3,76 +3,70 @@ import SwiftUI
 /// Animated waveform visualization for meeting recording
 struct MeetingWaveformView: View {
     @ObservedObject var recorder: MeetingRecorder
-    
+
+    /// Noise floor in dB. Levels at or below this render at minimum bar height.
+    private let noiseFloor: Float = -50
+    /// Minimum bar height in points. Bars at or below the noise floor render at this height.
+    private let minBarHeight: CGFloat = 4
+
     @State private var levels: [Float] = Array(repeating: 0, count: 50)
+    @State private var speakerLabels: [String] = Array(repeating: "", count: 50)
     private let maxSamples = 50
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
-    
+
     var body: some View {
-        GeometryReader { geo in
-            HStack(spacing: 3) {
-                ForEach(0..<maxSamples, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(barGradient(for: index))
-                        .frame(width: barWidth(geo: geo), height: barHeight(for: index, in: geo))
-                        .animation(.easeOut(duration: 0.1), value: levels[index])
-                }
+        Canvas { context, size in
+            let spacing: CGFloat = 3
+            let barWidth = (size.width - CGFloat(maxSamples - 1) * spacing) / CGFloat(maxSamples)
+
+            for index in 0..<levels.count {
+                let level = levels[index]
+                let label = speakerLabels[index]
+                let speaker = Speaker(displayName: label)
+                let color = speakerPaletteColor(speaker)
+
+                let levelDB = 20 * log10(max(level, 1e-7))
+                let normalized = max(0, min(1, (levelDB - noiseFloor) / (0 - noiseFloor)))
+                let height = max(minBarHeight, CGFloat(normalized) * size.height)
+                let x = CGFloat(index) * (barWidth + spacing)
+                let y = (size.height - height) / 2
+
+                let rect = CGRect(x: x, y: y, width: barWidth, height: height)
+                let path = RoundedRectangle(cornerRadius: 2).path(in: rect)
+                context.fill(path, with: .color(color))
             }
-            .frame(maxHeight: .infinity)
         }
         .onReceive(timer) { _ in
             updateLevels()
         }
-    }
-    
-    private func barWidth(geo: GeometryProxy) -> CGFloat {
-        let totalSpacing = CGFloat(maxSamples - 1) * 3
-        return (geo.size.width - totalSpacing) / CGFloat(maxSamples)
-    }
-    
-    private func barHeight(for index: Int, in geo: GeometryProxy) -> CGFloat {
-        let level = levels[index]
-        let minHeight: CGFloat = 4
-        let maxHeight = geo.size.height
-        let normalizedLevel = CGFloat(level)
-        return max(minHeight, normalizedLevel * maxHeight)
-    }
-    
-    private func barGradient(for index: Int) -> LinearGradient {
-        let level = levels[index]
-        
-        let colors: [Color]
-        if level > 0.7 {
-            colors = [.red, .orange]
-        } else if level > 0.4 {
-            colors = [.orange, .yellow]
-        } else {
-            colors = [.teal, .cyan]
+        .onChange(of: recorder.isRecording) { _, isRecording in
+            if isRecording {
+                levels = Array(repeating: 0, count: maxSamples)
+                speakerLabels = Array(repeating: "", count: maxSamples)
+            }
         }
-        
-        return LinearGradient(
-            colors: colors,
-            startPoint: .bottom,
-            endPoint: .top
-        )
     }
-    
+
     private func updateLevels() {
         guard recorder.isRecording else {
-            // Reset to minimal wave when not recording
-            withAnimation {
+            if levels.allSatisfy({ $0 < 0.001 }) || levels.count < maxSamples {
                 levels = (0..<maxSamples).map { i in
                     Float(sin(Double(i) * 0.3)) * 0.1 + 0.1
                 }
+                speakerLabels = Array(repeating: "", count: maxSamples)
             }
             return
         }
-        
-        // Add new level and shift
+
         let newLevel = recorder.normalizedLevel
+        let currentSpeaker = recorder.activeSpeakerLabel
+
         levels.append(newLevel)
+        speakerLabels.append(currentSpeaker)
+
         if levels.count > maxSamples {
             levels.removeFirst()
+            speakerLabels.removeFirst()
         }
     }
 }
