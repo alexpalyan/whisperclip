@@ -4,26 +4,39 @@ import SwiftUI
 struct MeetingWaveformView: View {
     @ObservedObject var recorder: MeetingRecorder
 
+    private struct WaveformPoint {
+        let level: Float
+        let speakerLabel: String
+    }
+
     /// Noise floor in dB. Levels at or below this render at minimum bar height.
     private let noiseFloor: Float = -50
     /// Minimum bar height in points. Bars at or below the noise floor render at this height.
     private let minBarHeight: CGFloat = 4
 
-    @State private var levels: [Float] = Array(repeating: 0, count: 50)
-    @State private var speakerLabels: [String] = Array(repeating: "", count: 50)
-    private let maxSamples = 50
+    @State private var points: [WaveformPoint] = Array(
+        repeating: WaveformPoint(level: 0, speakerLabel: ""),
+        count: 250
+    )
+    private let maxSamples = 250
     private let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Canvas { context, size in
-            let spacing: CGFloat = 3
-            let barWidth = (size.width - CGFloat(maxSamples - 1) * spacing) / CGFloat(maxSamples)
+            let spacing: CGFloat = 1
+            let barWidth: CGFloat = 2
 
-            for index in 0..<levels.count {
-                let level = levels[index]
-                let label = speakerLabels[index]
+            for index in 0..<points.count {
+                let point = points[index]
+                let level = point.level
+                let label = point.speakerLabel
                 let speaker = Speaker(displayName: label)
-                let color = speakerPaletteColor(speaker)
+                let color: Color
+                if label.isEmpty || speaker == .unknown {
+                    color = Color.gray.opacity(0.3)
+                } else {
+                    color = speakerPaletteColor(speaker)
+                }
 
                 let levelDB = 20 * log10(max(level, 1e-7))
                 let normalized = max(0, min(1, (levelDB - noiseFloor) / (0 - noiseFloor)))
@@ -41,19 +54,23 @@ struct MeetingWaveformView: View {
         }
         .onChange(of: recorder.isRecording) { _, isRecording in
             if isRecording {
-                levels = Array(repeating: 0, count: maxSamples)
-                speakerLabels = Array(repeating: "", count: maxSamples)
+                points = Array(
+                    repeating: WaveformPoint(level: 0, speakerLabel: ""),
+                    count: maxSamples
+                )
             }
         }
     }
 
     private func updateLevels() {
         guard recorder.isRecording else {
-            if levels.allSatisfy({ $0 < 0.001 }) || levels.count < maxSamples {
-                levels = (0..<maxSamples).map { i in
-                    Float(sin(Double(i) * 0.3)) * 0.1 + 0.1
+            if points.allSatisfy({ $0.level < 0.001 }) || points.count < maxSamples {
+                points = (0..<maxSamples).map { i in
+                    WaveformPoint(
+                        level: Float(sin(Double(i) * 0.3)) * 0.1 + 0.1,
+                        speakerLabel: ""
+                    )
                 }
-                speakerLabels = Array(repeating: "", count: maxSamples)
             }
             return
         }
@@ -61,12 +78,10 @@ struct MeetingWaveformView: View {
         let newLevel = recorder.normalizedLevel
         let currentSpeaker = recorder.activeSpeakerLabel
 
-        levels.append(newLevel)
-        speakerLabels.append(currentSpeaker)
+        points.append(WaveformPoint(level: newLevel, speakerLabel: currentSpeaker))
 
-        if levels.count > maxSamples {
-            levels.removeFirst()
-            speakerLabels.removeFirst()
+        if points.count > maxSamples {
+            points.removeFirst()
         }
     }
 }
