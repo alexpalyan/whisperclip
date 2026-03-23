@@ -142,6 +142,12 @@ class MeetingRecorder: NSObject, ObservableObject {
             try await capture.startCapture(
                 onAudioChunk: { [weak self] source, samples, startTime in
                     guard let self = self else { return }
+                    // Mic channel is always "Me" — set label immediately for waveform color
+                    if source == .microphone {
+                        Task { @MainActor in
+                            self.activeSpeakerLabel = Speaker.me.displayName
+                        }
+                    }
                     // Use transcription queue to serialize CoreML predictions
                     Task {
                         await self.transcriptionQueue.enqueue(
