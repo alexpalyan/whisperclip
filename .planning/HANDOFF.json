@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-03-22T10:24:51.093Z",
+  "phase": "new-milestone",
+  "phase_name": "v1.1 Speaker Diarization — Milestone Setup",
+  "phase_dir": ".planning",
+  "plan": 0,
+  "task": 3,
+  "total_tasks": 5,
+  "status": "paused",
+  "completed_tasks": [
+    {"id": 1, "name": "PROJECT.md updated with v1.1 milestone", "status": "done"},
+    {"id": 2, "name": "STATE.md reset for v1.1", "status": "done"},
+    {"id": 3, "name": "REQUIREMENTS.md created (15 requirements, 4 categories)", "status": "done"}
+  ],
+  "remaining_tasks": [
+    {"id": 4, "name": "Research decision (skip/run) — was interrupted", "status": "not_started", "note": "Recommend skip: deep FluidAudio debug context already collected this session"},
+    {"id": 5, "name": "Spawn gsd-roadmapper to create ROADMAP.md (phases 6-8)", "status": "not_started"}
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {"decision": "clusteringThreshold=0.3 committed", "rationale": "0.4 still merged speakers; 0.3 → speakerThreshold=0.36 successfully detected speaker 2 at distance 0.437", "phase": "pre-milestone debug"},
+    {"decision": "Hybrid splitting: speaker change + 30s max cap", "rationale": "Natural utterance boundaries + safety cap for long monologues", "phase": "v1.1"},
+    {"decision": "Colored waveform for real-time feedback", "rationale": "User preference over name chip or text indicator", "phase": "v1.1"},
+    {"decision": "Chat-style bubbles (iMessage)", "rationale": "User preference: consecutive same-speaker segments grouped, Me right / others left", "phase": "v1.1"}
+  ],
+  "uncommitted_files": [
+    ".planning/PROJECT.md",
+    ".planning/STATE.md",
+    ".planning/REQUIREMENTS.md"
+  ],
+  "next_action": "Resume /gsd:new-milestone: skip research (we have deep FluidAudio context from debug session) → spawn roadmapper starting from Phase 6. Expected roadmap: Phase 6=Pipeline rewrite (PIPE-01..05, SPKR-01..03), Phase 7=Real-time colored waveform (RT-01..03), Phase 8=Chat UI bubbles (CHAT-01..04).",
+  "context_notes": "Deep debug session: wired DiarizerManager, fixed Me regression, tuned threshold 0.7→0.4→0.3, confirmed speaker 2 detects at distance 0.437. Core architectural problem: resolveSpeaker() returns ONE dominant speaker per chunk — new pipeline needed. Requirements gathered, planning files written, roadmap not yet created."
+}
