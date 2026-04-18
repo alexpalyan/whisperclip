@@ -1,15 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Speaker Diarization
-status: unknown
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-03-23T09:10:44.578Z"
+milestone: v1.2
+milestone_name: Live Enrichment & Diarization Fix
+status: Phase 10 complete; ready for Phase 11
+stopped_at: Phase 10 PASS (10-01 and 10-02 complete)
+last_updated: "2026-04-18T16:59:21Z"
 progress:
-  total_phases: 5
-  completed_phases: 4
-  total_plans: 11
-  completed_plans: 11
+  total_phases: 4
+  completed_phases: 1
+  total_plans: 2
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -19,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Точна транскрипція зустрічей з правильною атрибуцією спікерів.
-**Current focus:** Phase 10 — chat-bubble-ui
+**Current focus:** Phase 11 — live-transcription-stream
 
 ---
 
 ## Current Position
 
-Phase: 09 (waveform-color-per-speaker) — COMPLETE
-Plan: 5 of 5
+Phase: 10 (mutable-data-model) — COMPLETE
+Next: Phase 11 (live-transcription-stream) — READY
 
 ## Performance Metrics
 
@@ -99,18 +100,22 @@ Plan: 5 of 5
 - Set `activeSpeakerLabel` to `Speaker.me.displayName` at mic chunk ingress so waveform color reflects local speech immediately (09-04)
 - Lock mic-source identity with regression checks for `Speaker.me.displayName`, `Speaker(displayName:)`, color index, and `AudioSource.microphone.speaker` mapping (09-04)
 - TEMP (2026-03-23 11:30 prep): Disable diarization pipeline in `MeetingRecorder`; use continuous source-based streaming path (`mic -> "Me"`, system/non-mic -> `activeSpeakerLabel = ""`) until explicit re-enable decision
+- Phase 10 restored mutable transcript segments via `@Observable` `MeetingSegment`, pending/finalize APIs in `MeetingSession`, and in-place transcript row updates without replacing list elements
+- Phase 10 re-enabled diarizer processing with 7-second micro-windows, sample-accurate split helpers, and pending transcript finalization for diarized buffers
+- Phase 10 UAT is accepted as PASS with known carry-over limitations: transient pending UI can still appear in edge cases, and speaker-boundary quality still needs follow-up in Phases 11 and 12
 
 ### Blockers/Concerns
 
 - Phase 6: diarization polling cadence (100-200ms) unvalidated against CoreML latency on M-series — measure with Instruments before finalizing
 - Phase 6: clusteringThreshold=0.3 validated for one scenario; verify on 3+ speaker pairs before Phase 8 integration
 - Phase 7: CMSampleBuffer format assumption (32-bit float PCM) needs assertion verified on macOS 14 and 15
-- TEMP: diarization-driven speaker attribution intentionally paused; do not plan diarizer-dependent behavior without explicit milestone decision to restore it
+- Phase 10 reduced but did not eliminate split-boundary artifacts; watch for occasional start/end truncation or mixed attribution near speaker changes
+- Live transcription still waits on current recorder/ASR chunk flow; Phase 11 remains the milestone-critical step for immediate render behavior
 
 ---
 
 ## Session Continuity
 
 Last session: 2026-03-23T09:04:53.214Z
-Stopped at: Completed 09-04-PLAN.md
+Stopped at: Phase 10 PASS (10-01 and 10-02 complete)
 Resume file: None
