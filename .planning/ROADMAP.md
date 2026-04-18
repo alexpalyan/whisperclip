@@ -178,7 +178,13 @@ Plans:
 2. System audio transcription renders immediately under `[Pending]` speaker label; label is replaced by the resolved speaker name when diarizer confirms
 3. No audio samples are dropped or duplicated between the fast ASR path and the diarizer micro-window path
 4. `swift build` produces zero warnings; no regressions to mic or system audio transcription
-   **Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — Wave 0: StreamingTests test scaffold (LIVE-01, LIVE-02, LIVE-03)
+- [ ] 11-02-PLAN.md — VoiceToTextProtocol.processStream + VoiceToTextModel WhisperKit streaming (LIVE-01)
+- [ ] 11-03-PLAN.md — Speaker.pending case + displayText/displaySpeaker fixes (LIVE-02)
+- [ ] 11-04-PLAN.md — MeetingRecorder VoiceToTextFactory wiring + TranscriptSegmentRow fix (LIVE-01, LIVE-02, LIVE-03)
 
 #### Phase 12: Chat Bubble UI
 
@@ -223,7 +229,7 @@ Plans:
 | 8. MeetingRecorder Pipeline Rewire   | v1.1      | 2/2            | Complete    | 2026-03-22 |
 | 9. Waveform Color Per Speaker        | v1.1      | 5/5            | Complete    | 2026-03-23 |
 | 10. Mutable Data Model + Diarizer    | v1.2      | 0/2            | In progress | -          |
-| 11. Live Transcription Stream        | v1.2      | 0/TBD          | Not started | -          |
+| 11. Live Transcription Stream        | v1.2      | 0/4            | Not started | -          |
 | 12. Chat Bubble UI                   | v1.2      | 0/TBD          | Not started | -          |
 | 13. Reconciler — Async Enrichment    | v1.2      | 0/TBD          | Not started | -          |
 
