@@ -89,11 +89,41 @@ class MeetingRecorder: NSObject, ObservableObject {
             throw MeetingRecorderError.modelLoadFailed(error.localizedDescription)
         }
 
-        // Diarization pipeline is intentionally disabled for stable, low-latency streaming.
-        diarizerManager = nil
-        speakerBufferManager = nil
-        bufferConsumerTask = nil
-        Logger.log("Diarization disabled: using continuous source-based transcription stream", log: Logger.general)
+        do {
+            let diarizer = DiarizerManager()
+            let models = try await DiarizerModels.load()
+            diarizer.initialize(models: models)
+
+            let manager = SpeakerBufferManager(
+                diarizer: diarizer,
+                sampleRate: sampleRate,
+                pollingInterval: 150_000_000,
+                microWindowSeconds: 7
+            )
+
+            diarizerManager = diarizer
+            speakerBufferManager = manager
+
+            await manager.start()
+            bufferConsumerTask = Task { [weak self] in
+                guard let self = self else { return }
+                for await buffer in manager.buffers {
+                    await MainActor.run {
+                        self.activeSpeakerLabel = buffer.speakerLabel
+                    }
+                    await self.transcriptionQueue.enqueue(buffer: buffer) { [weak self] buffered in
+                        await self?.transcribeClosedBuffer(buffered)
+                    }
+                }
+            }
+
+            Logger.log("Diarization enabled with 7s micro-windows", log: Logger.general)
+        } catch {
+            diarizerManager = nil
+            speakerBufferManager = nil
+            bufferConsumerTask = nil
+            Logger.log("Failed to initialize diarizer, falling back to source-based transcription: \(error)", log: Logger.general, type: .error)
+        }
         
         // Create dual channel capture
         dualCapture = DualChannelAudioCapture()
@@ -101,6 +131,8 @@ class MeetingRecorder: NSObject, ObservableObject {
         guard let capture = dualCapture else {
             throw MeetingRecorderError.recordingFailed
         }
+
+        let activeBufferManager = speakerBufferManager
         
         // Start dual channel capture
         do {
@@ -126,10 +158,17 @@ class MeetingRecorder: NSObject, ObservableObject {
                 onSystemBatch: { [weak self] samples, time in
                     guard let self = self else { return }
                     Task {
-                        await MainActor.run {
-                            self.activeSpeakerLabel = ""
+                        if let manager = activeBufferManager {
+                            await MainActor.run {
+                                self.activeSpeakerLabel = ""
+                            }
+                            await manager.onAudioBatch(samples, atTime: time)
+                        } else {
+                            await MainActor.run {
+                                self.activeSpeakerLabel = ""
+                            }
+                            await self.accumulateSystemFallback(samples, atTime: time)
                         }
-                        await self.accumulateSystemFallback(samples, atTime: time)
                     }
                 }
             )
@@ -350,6 +389,20 @@ class MeetingRecorder: NSObject, ObservableObject {
 
         Logger.log("processAudioChunk: processing \(sourceName) chunk with \(samples.count) samples", log: Logger.general)
 
+        let chunkDuration = Double(samples.count) / Double(sampleRate)
+        let endTime = startTime + chunkDuration
+        let pendingSegment = MeetingSegment(
+            speaker: source.speaker,
+            text: "",
+            startTime: startTime,
+            endTime: endTime,
+            confidence: 0,
+            isPending: true
+        )
+
+        segmentCount += 1
+        transcriptCallback?(pendingSegment)
+
         // Create temp WAV file for transcription
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting_\(sourceName)_\(UUID().uuidString).wav")
@@ -367,6 +420,7 @@ class MeetingRecorder: NSObject, ObservableObject {
 
             guard !transcriptionResult.text.isEmpty else {
                 Logger.log("processAudioChunk: empty transcription from \(sourceName)", log: Logger.general)
+                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 return
             }
 
@@ -375,37 +429,35 @@ class MeetingRecorder: NSObject, ObservableObject {
             let newText = extractNewText(normalizedText, for: source)
 
             guard !newText.isEmpty else {
+                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 Logger.log("processAudioChunk: no new text after deduplication from \(sourceName)", log: Logger.general)
                 return
             }
 
             // Determine speaker using the capture source. Diarized system audio is handled
             // upstream by SpeakerBufferManager and transcribeClosedBuffer(_:).
-            let chunkDuration = Double(samples.count) / Double(sampleRate)
-            let endTime = startTime + chunkDuration
             let speaker = source.speaker
-
-            // Create segment
-            let segment = MeetingSegment(
-                speaker: speaker,
-                text: newText,
-                startTime: startTime,
-                endTime: endTime,
-                confidence: 0.95
-            )
-
-            segmentCount += 1
 
             // Store for deduplication
             if source == .microphone {
                 processedMicTexts.insert(newText)
             }
 
+            pendingSegment.confidence = 0.95
+            await MeetingSession.shared.finalizeSegment(
+                id: pendingSegment.id,
+                text: newText,
+                speaker: speaker
+            )
+
             Logger.log("processAudioChunk: created \(speaker.displayName) segment #\(segmentCount): '\(newText.prefix(50))'", log: Logger.general)
-
-            transcriptCallback?(segment)
-
         } catch {
+            pendingSegment.confidence = 0
+            await MeetingSession.shared.finalizeSegment(
+                id: pendingSegment.id,
+                text: "[transcription failed]",
+                speaker: source.speaker
+            )
             Logger.log("processAudioChunk: error processing \(sourceName): \(error)", log: Logger.general, type: .error)
             lastError = error.localizedDescription
         }
@@ -431,37 +483,57 @@ class MeetingRecorder: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: tempURL)
         }
 
+        let chunkDuration = Double(buffer.samples.count) / Double(sampleRate)
+        let startTime = buffer.startTime
+        let endTime = startTime + chunkDuration
+        let speaker = Speaker(displayName: buffer.speakerLabel)
+        let pendingSegment = MeetingSegment(
+            speaker: speaker,
+            text: "",
+            startTime: startTime,
+            endTime: endTime,
+            confidence: 0,
+            isPending: true
+        )
+
+        segmentCount += 1
+        transcriptCallback?(pendingSegment)
+
         do {
             try writeWAVFile(samples: buffer.samples, to: tempURL)
             let transcriptionResult = try await asrManager.transcribe(tempURL)
 
             guard !transcriptionResult.text.isEmpty else {
                 Logger.log("transcribeClosedBuffer: empty transcription from \(sourceName)", log: Logger.general)
+                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 return
             }
 
             let normalizedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !normalizedText.isEmpty else { return }
+            guard !normalizedText.isEmpty else {
+                Logger.log("transcribeClosedBuffer: empty normalized transcription from \(sourceName)", log: Logger.general)
+                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
+                return
+            }
 
-            let chunkDuration = Double(buffer.samples.count) / Double(sampleRate)
-            let endTime = buffer.startTime + chunkDuration
-            let segment = MeetingSegment(
-                speaker: .labeled(buffer.speakerLabel),
+            pendingSegment.confidence = 0.95
+            await MeetingSession.shared.finalizeSegment(
+                id: pendingSegment.id,
                 text: normalizedText,
-                startTime: buffer.startTime,
-                endTime: endTime,
-                confidence: 0.95
+                speaker: speaker
             )
-
-            segmentCount += 1
 
             Logger.log(
                 "transcribeClosedBuffer: created \(buffer.speakerLabel) segment #\(segmentCount): '\(normalizedText.prefix(50))'",
                 log: Logger.general
             )
-
-            transcriptCallback?(segment)
         } catch {
+            pendingSegment.confidence = 0
+            await MeetingSession.shared.finalizeSegment(
+                id: pendingSegment.id,
+                text: "[transcription failed]",
+                speaker: speaker
+            )
             Logger.log(
                 "transcribeClosedBuffer: error processing \(sourceName): \(error)",
                 log: Logger.general,

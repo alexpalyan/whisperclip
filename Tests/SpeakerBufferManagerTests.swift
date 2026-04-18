@@ -250,6 +250,26 @@ final class SpeakerBufferManagerTests: XCTestCase {
         XCTAssertEqual(buffers[0].samples.count, 16_000, "Flushed buffer should have all 16,000 samples")
     }
 
+    func testSilentMicroWindowIsDiscarded() async throws {
+        let mock = MockDiarizationProvider()
+        mock.setResults([])
+
+        let manager = SpeakerBufferManager(
+            diarizer: mock,
+            sampleRate: 16_000,
+            pollingInterval: 50_000_000,
+            microWindowSeconds: 7
+        )
+
+        await manager.start()
+        await manager.onAudioBatch(Array(repeating: 0.0, count: 112_000), atTime: 0.0)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await manager.stop()
+
+        let buffers = await collectBuffers(from: manager, count: 1, timeout: 0.5)
+        XCTAssertTrue(buffers.isEmpty, "Silent 7s micro-window should be discarded, not emitted")
+    }
+
     // MARK: - SPKR-01: Same rawSpeakerId maps to same label across multiple polls
 
     func testSpeakerLabelStability() async throws {

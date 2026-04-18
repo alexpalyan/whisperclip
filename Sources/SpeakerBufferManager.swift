@@ -18,16 +18,19 @@ actor SpeakerBufferManager {
     /// Polling interval in nanoseconds. Default 150ms. Tuning knob for hardware profiles:
     /// - M4 Pro: 150_000_000 (150ms) — near real-time
     /// - M1 Air: 600_000_000 (600ms) — conservative
-    let pollingInterval: UInt64
+    nonisolated let pollingInterval: UInt64
 
     /// Sample rate in Hz. Must match DiarizerManager expectation.
-    let sampleRate: Int
+    nonisolated let sampleRate: Int
+
+    /// Micro-window duration: 7s by default.
+    nonisolated let microWindowSamples: Int
 
     /// Maximum buffer duration: 30s = 480,000 samples at 16kHz
-    let maxSamplesPerBuffer: Int
+    nonisolated let maxSamplesPerBuffer: Int
 
     /// Minimum buffer duration: 0.5s = 8,000 samples at 16kHz
-    let minSamplesPerBuffer: Int
+    nonisolated let minSamplesPerBuffer: Int
 
     // MARK: - Dependencies
 
@@ -39,6 +42,7 @@ actor SpeakerBufferManager {
     private var accumulatedSamples: [Float] = []
     private var bufferStartTime: TimeInterval = 0
     private var currentSpeakerId: String?
+    private var lastBatchSampleCount: Int = 0
 
     // MARK: - Speaker Label Resolution
 
@@ -55,11 +59,13 @@ actor SpeakerBufferManager {
     init(
         diarizer: any DiarizationProvider,
         sampleRate: Int = 16_000,
-        pollingInterval: UInt64 = 150_000_000
+        pollingInterval: UInt64 = 150_000_000,
+        microWindowSeconds: Int = 7
     ) {
         self.diarizer = diarizer
         self.sampleRate = sampleRate
         self.pollingInterval = pollingInterval
+        self.microWindowSamples = sampleRate * microWindowSeconds
         self.maxSamplesPerBuffer = sampleRate * 30   // 30 seconds
         self.minSamplesPerBuffer = sampleRate / 2    // 0.5 seconds (8,000 at 16kHz)
 
@@ -80,6 +86,7 @@ actor SpeakerBufferManager {
             bufferStartTime = time
         }
         accumulatedSamples.append(contentsOf: samples)
+        lastBatchSampleCount = samples.count
     }
 
     // MARK: - Lifecycle
@@ -120,19 +127,20 @@ actor SpeakerBufferManager {
         // Need samples for diarization
         guard !accumulatedSamples.isEmpty else { return }
 
-        // Sliding window: last 1 second (or all if < 1s)
-        let windowSize = sampleRate
-        let windowStart = max(0, accumulatedSamples.count - windowSize)
-        let window = Array(accumulatedSamples[windowStart...])
-
-        // Calculate the time offset for this window
-        let windowStartTime = bufferStartTime + Double(windowStart) / Double(sampleRate)
+        let window = accumulatedSamples
+        let windowStartTime = bufferStartTime
 
         do {
             let result = try diarizer.diarize(window, sampleRate: sampleRate, atTime: windowStartTime)
 
-            // Empty result (silence) — do NOT change speaker, just continue accumulating
-            guard !result.segments.isEmpty else { return }
+            // Empty result (silence/no speech) — discard full silent windows instead of
+            // emitting phantom buffers that later become failed transcript bubbles.
+            guard !result.segments.isEmpty else {
+                if accumulatedSamples.count >= microWindowSamples {
+                    discardSilentMicroWindow()
+                }
+                return
+            }
 
             // Extract dominant speaker by total speech duration
             var durationBySpeaker: [String: Float] = [:]
@@ -145,14 +153,25 @@ actor SpeakerBufferManager {
 
             // Speaker change detection
             if let current = currentSpeakerId, current != dominantId {
-                // Different speaker detected — flush the previous speaker's buffer
+                let diarizerOffset = result.segments.first(where: { $0.speakerId == dominantId })
+                    .map { Double($0.startTimeSeconds) }
+                    ?? Double(accumulatedSamples.count) / Double(sampleRate)
+                let fallbackOffset = Double(max(0, accumulatedSamples.count - lastBatchSampleCount)) / Double(sampleRate)
+                let changeOffset = diarizerOffset > 0 ? diarizerOffset : fallbackOffset
+
                 Logger.log(
-                    "SpeakerBufferManager: speaker change \(current) -> \(dominantId), buffer \(accumulatedSamples.count) samples",
+                    "SpeakerBufferManager: speaker change \(current) -> \(dominantId) at \(String(format: "%.2f", changeOffset))s",
                     log: Logger.general)
-                flushCurrentBuffer()
+                splitAndFlushCurrentBuffer(atSeconds: changeOffset, previousSpeakerId: current, newSpeakerId: dominantId)
+                currentSpeakerId = dominantId
+                return
             }
 
             currentSpeakerId = dominantId
+
+            if accumulatedSamples.count >= microWindowSamples {
+                flushMicroWindow()
+            }
 
         } catch {
             Logger.log("SpeakerBufferManager: diarization error: \(error)", log: Logger.general, type: .error)
@@ -160,6 +179,74 @@ actor SpeakerBufferManager {
     }
 
     // MARK: - Buffer Flush
+
+    nonisolated func splitBuffer(_ samples: [Float], atSeconds offset: Double) -> ([Float], [Float]) {
+        let splitIndex = min(max(0, Int(offset * Double(sampleRate))), samples.count)
+        return (Array(samples.prefix(splitIndex)), Array(samples.dropFirst(splitIndex)))
+    }
+
+    private func flushMicroWindow() {
+        let windowSamples = Array(accumulatedSamples.prefix(microWindowSamples))
+        let overflow = Array(accumulatedSamples.dropFirst(microWindowSamples))
+
+        guard windowSamples.count >= minSamplesPerBuffer else {
+            accumulatedSamples = overflow
+            return
+        }
+
+        let label = resolveLabel(for: currentSpeakerId)
+        let closed = ClosedSpeakerBuffer(
+            samples: windowSamples,
+            speakerLabel: label,
+            startTime: bufferStartTime
+        )
+
+        Logger.log(
+            "SpeakerBufferManager: micro-window flush \(label) \(windowSamples.count) samples",
+            log: Logger.general
+        )
+
+        continuation?.yield(closed)
+        bufferStartTime += Double(windowSamples.count) / Double(sampleRate)
+        accumulatedSamples = overflow
+    }
+
+    private func discardSilentMicroWindow() {
+        let discardedCount = min(accumulatedSamples.count, microWindowSamples)
+        let overflow = Array(accumulatedSamples.dropFirst(discardedCount))
+
+        Logger.log(
+            "SpeakerBufferManager: discarded silent micro-window \(discardedCount) samples",
+            log: Logger.general
+        )
+
+        bufferStartTime += Double(discardedCount) / Double(sampleRate)
+        accumulatedSamples = overflow
+        currentSpeakerId = nil
+    }
+
+    private func splitAndFlushCurrentBuffer(
+        atSeconds offset: Double,
+        previousSpeakerId: String,
+        newSpeakerId: String
+    ) {
+        let (firstSamples, secondSamples) = splitBuffer(accumulatedSamples, atSeconds: offset)
+
+        if firstSamples.count >= minSamplesPerBuffer {
+            continuation?.yield(
+                ClosedSpeakerBuffer(
+                    samples: firstSamples,
+                    speakerLabel: resolveLabel(for: previousSpeakerId),
+                    startTime: bufferStartTime
+                )
+            )
+        }
+
+        let splitTime = bufferStartTime + Double(firstSamples.count) / Double(sampleRate)
+        bufferStartTime = splitTime
+        accumulatedSamples = secondSamples
+        currentSpeakerId = newSpeakerId
+    }
 
     /// Force-flush exactly `maxSamplesPerBuffer` samples, keeping any overflow in `accumulatedSamples`.
     /// Used only by the 30s cap check in `pollDiarizer()`.
