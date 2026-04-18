@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Represents a speaker in a meeting.
 /// - `.me`: the local microphone channel (always the app user)
@@ -97,31 +98,89 @@ enum Speaker: Codable, Hashable {
 }
 
 /// A single segment of transcription with speaker info
-struct MeetingSegment: Identifiable, Codable, Hashable {
+@Observable
+final class MeetingSegment: Identifiable, Codable, Hashable {
     let id: UUID
-    let speaker: Speaker
-    let text: String
+    var speaker: Speaker
+    var text: String
     let startTime: TimeInterval
     let endTime: TimeInterval
-    let confidence: Float
-    
-    init(speaker: Speaker, text: String, startTime: TimeInterval, endTime: TimeInterval, confidence: Float = 1.0) {
+    var confidence: Float
+    var isPending: Bool
+
+    init(
+        speaker: Speaker,
+        text: String,
+        startTime: TimeInterval,
+        endTime: TimeInterval,
+        confidence: Float = 1.0,
+        isPending: Bool = false
+    ) {
         self.id = UUID()
         self.speaker = speaker
         self.text = text
         self.startTime = startTime
         self.endTime = endTime
         self.confidence = confidence
+        self.isPending = isPending
     }
-    
+
     var duration: TimeInterval {
         endTime - startTime
     }
-    
+
     var formattedTime: String {
         let minutes = Int(startTime) / 60
         let seconds = Int(startTime) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    var displayText: String {
+        isPending ? "..." : text
+    }
+
+    var displaySpeaker: Speaker {
+        isPending ? .unknown : speaker
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case speaker
+        case text
+        case startTime
+        case endTime
+        case confidence
+        case isPending
+    }
+
+    required init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.speaker = try container.decode(Speaker.self, forKey: .speaker)
+        self.text = try container.decode(String.self, forKey: .text)
+        self.startTime = try container.decode(TimeInterval.self, forKey: .startTime)
+        self.endTime = try container.decode(TimeInterval.self, forKey: .endTime)
+        self.confidence = try container.decodeIfPresent(Float.self, forKey: .confidence) ?? 1.0
+        self.isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(speaker, forKey: .speaker)
+        try container.encode(text, forKey: .text)
+        try container.encode(startTime, forKey: .startTime)
+        try container.encode(endTime, forKey: .endTime)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(isPending, forKey: .isPending)
+    }
+
+    static func == (lhs: MeetingSegment, rhs: MeetingSegment) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }
 

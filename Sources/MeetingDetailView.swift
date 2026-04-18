@@ -677,15 +677,15 @@ struct TranscriptSegmentRow: View {
                 .frame(width: 40)
             
             // Speaker badge
-            Text(segment.speaker.displayName)
+            Text(segment.isPending ? "•••" : segment.speaker.displayName)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(speakerColor)
+                .foregroundColor(segment.isPending ? .gray : speakerColor)
                 .frame(width: 50)
             
             // Text
-            Text(segment.text)
+            Text(segment.isPending ? "..." : segment.text)
                 .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(segment.isPending ? .secondary : .white.opacity(0.9))
                 .textSelection(.enabled)
         }
         .padding(12)

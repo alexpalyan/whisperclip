@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 /// Orchestrates the complete meeting lifecycle
 @MainActor
@@ -124,7 +125,12 @@ class MeetingSession: ObservableObject {
             try await recorder.startRecording(
                 onTranscript: { [weak self] segment in
                     Task { @MainActor in
-                        self?.handleNewSegment(segment, forMeetingId: capturedMeetingId)
+                        guard let self = self else { return }
+                        if segment.isPending {
+                            self.addPendingSegment(segment)
+                        } else {
+                            self.handleNewSegment(segment, forMeetingId: capturedMeetingId)
+                        }
                     }
                 },
                 onError: { [weak self] error in
@@ -260,6 +266,49 @@ class MeetingSession: ObservableObject {
         storage.addSegment(segment, to: meetingId)
         
         Logger.log("New segment added to meeting \(meetingId): \(segment.text.prefix(50))...", log: Logger.general)
+    }
+
+    // MARK: - Pending Segment API
+
+    func addPendingSegment(_ segment: MeetingSegment) {
+        guard isActive else { return }
+        liveTranscript.append(segment)
+        liveTranscript.sort { $0.startTime < $1.startTime }
+    }
+
+    func finalizeSegment(id: UUID, text: String, speaker: Speaker) {
+        guard let segment = liveTranscript.first(where: { $0.id == id }) else {
+            Logger.log("MeetingSession.finalizeSegment: segment \(id) not found in liveTranscript", log: Logger.general, type: .error)
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            segment.text = text
+            segment.speaker = speaker
+            segment.isPending = false
+        }
+
+        if let meetingId = currentMeetingId {
+            storage.addSegment(segment, to: meetingId)
+        }
+    }
+
+    func replaceSegment(id: UUID, with newSegments: [MeetingSegment]) {
+        guard let index = liveTranscript.firstIndex(where: { $0.id == id }) else {
+            Logger.log("MeetingSession.replaceSegment: segment \(id) not found", log: Logger.general, type: .error)
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            liveTranscript.remove(at: index)
+            liveTranscript.insert(contentsOf: newSegments, at: index)
+        }
+
+        if let meetingId = currentMeetingId {
+            for segment in newSegments {
+                storage.addSegment(segment, to: meetingId)
+            }
+        }
     }
     
     // MARK: - Summary Generation
