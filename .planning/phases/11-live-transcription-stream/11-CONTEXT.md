@@ -54,10 +54,15 @@
 - `.planning/phases/10-mutable-data-model/10-CONTEXT.md` — Observable segments logic
 
 ### Source Code
-- `Sources/MeetingRecorder.swift` — Transcription ingress points
-- `Sources/MeetingModels.swift` — `MeetingSegment` definition
-- `Sources/TranscriptionQueue.swift` — Serialized CoreML execution
-- `Sources/LocalWhisperKit.swift` — ASR engine interface
+- `Sources/MeetingRecorder.swift` — Transcription ingress points (D-07, D-14)
+- `Sources/MeetingModels.swift` — `MeetingSegment` & `Speaker` definitions (D-11, D-12)
+- `Sources/MeetingDetailView.swift` — `TranscriptSegmentRow` UI (D-13)
+- `Sources/VoiceToTextFactory.swift` — STT engine dispatch (D-07)
+- `Sources/VoiceToTextProtocol.swift` — Streaming interface definition (D-08)
+- `Sources/VoiceToTextModel.swift` — WhisperKit streaming (D-08)
+- `Sources/ParakeetVoiceToTextModel.swift` — Parakeet streaming (D-08)
+- `Sources/TranscriptionQueue.swift` — Serialized CoreML execution (D-06)
+- `Sources/LocalWhisperKit.swift` — ASR engine interface (D-08)
 
 </canonical_refs>
 
