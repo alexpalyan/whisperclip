@@ -32,6 +32,9 @@
 ### [BEHAVIOR] Corrections
 - **D-09:** On-the-fly Correction: Дозволяємо тексту "мерехтіти" (змінюватися), поки Whisper уточнює контекст останнього речення.
 - **D-11:** Display Logic Fix: `MeetingSegment.displayText` ПОВИНЕН показувати `text`, якщо він не порожній, навіть при `isPending = true`. Логіка: `text.isEmpty ? "..." : text`. Це дозволяє бачити токени в реальному часі.
+- **D-12:** Pending Speaker State: Додати `case pending` до enum `Speaker`. При `isPending = true`, метод `displaySpeaker` має повертати:
+  - `.me` — для мікрофона (визначається відразу).
+  - `.pending` — для системного звуку (до моменту вирішення діарізатором).
 
 ### Claude's Discretion
 - Вибір конкретної реалізації callback-інтерфейсу в `VoiceToTextProtocol`.
