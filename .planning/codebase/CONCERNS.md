@@ -16,6 +16,12 @@
 - Impact: Increased risk of bugs during recording state transitions.
 - Fix approach: Extract shared recording logic and simplify state management.
 
+**Swift Strict Concurrency Warnings:**
+- Issue: Significant number of concurrency warnings (SWIFT_STRICT_CONCURRENCY=complete), particularly around `MeetingRecorder` and `TranscriptionQueue` closure handoffs.
+- Files: `Sources/MeetingRecorder.swift`, `Sources/TranscriptionQueue.swift`
+- Impact: Potential for hard-to-debug race conditions or crashes, especially as async complexity grows in Phase 13 (Reconciler).
+- Fix approach: Systematic cleanup of non-isolated closures, proper actor isolation, and Sendable conformance audits.
+
 ## Performance Bottlenecks
 
 **CoreML Inference:**

@@ -111,6 +111,7 @@ Next: Phase 11 (live-transcription-stream) — READY
 - Phase 7: CMSampleBuffer format assumption (32-bit float PCM) needs assertion verified on macOS 14 and 15
 - Phase 10 reduced but did not eliminate split-boundary artifacts; watch for occasional start/end truncation or mixed attribution near speaker changes
 - Live transcription still waits on current recorder/ASR chunk flow; Phase 11 remains the milestone-critical step for immediate render behavior
+- **Swift Concurrency:** Phase 11 implementation leaves multiple strict-concurrency warnings (queue-handoffs) in `MeetingRecorder`. This is a high-priority tech debt that may impact `Reconciler` stability in Phase 13.
 
 ---
 
