@@ -24,10 +24,11 @@
 
 ### [ARCH] Queue & Performance
 - **D-06:** Sequential Queue: `TranscriptionQueue` залишається послідовною. Одна задача CoreML (Neural Engine) за раз для стабільності на M-чипах.
-- **D-07:** Architectural Alignment: `MeetingRecorder` ПОВИНЕН використовувати `VoiceToTextFactory` замість прямого виклику `LocalParakeet.loadModel()`, щоб вибір WhisperKit у налаштуваннях став робочим для запису зустрічей.
+- **D-07:** Architectural Alignment: `MeetingRecorder` ПОВИНЕН використовувати `VoiceToTextProtocol` (через `VoiceToTextFactory`) в обох методах — `processAudioChunk` (мікрофон) та `transcribeClosedBuffer` (системне аудіо) — замість прямих викликів `asrManager.transcribe()`.
 - **D-08:** Protocol Extension: `VoiceToTextProtocol` розширюється методом `processStream` (або аналогічним), який приймає callback для передачі токенів.
 - **D-09:** Decoupling: `MeetingRecorder` тепер не чекає завершення всього сегмента, а починає стрімінг токенів через оновлений `VoiceToTextProtocol`.
 - **D-10:** No Deduplication: Відмова від `extractNewText` для Live-шляху. Текст просто додається до кінця сегмента, оскільки стрімінг природно видає послідовність.
+- **D-14:** Callback Lifecycle: Кожен `MeetingSegment` має бути переданий у `transcriptCallback` ВІДРАЗУ після створення в `isPending` стані, щоб UI міг підписатися на оновлення його властивостей (`text`, `isPending`).
 
 ### [BEHAVIOR] Corrections
 - **D-09:** On-the-fly Correction: Дозволяємо тексту "мерехтіти" (змінюватися), поки Whisper уточнює контекст останнього речення.
