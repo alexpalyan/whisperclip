@@ -149,7 +149,7 @@ Plans:
 
 **Architecture:** Immediate Render + Async Enrichment — text appears instantly under `[Me]`/`[Pending]`, diarizer metadata arrives later and patches speaker labels without blocking the transcript stream.
 
-#### Phase 11: Mutable Data Model + Diarizer Micro-Windows
+#### Phase 10: Mutable Data Model + Diarizer Micro-Windows
 
 **Goal**: `MeetingSegment` becomes a reactive mutable model that supports retroactive speaker updates; diarizer is restored with 5-10s micro-windows (replacing the disabled 30s batch mode), eliminating speaker blending
 **Depends on**: Phase 9
@@ -161,12 +161,16 @@ Plans:
 3. Speaker blending (two speakers sharing one segment due to a late flush) is eliminated — speaker changes trigger a segment boundary within the 7s window
 4. Existing `MeetingSession`, `MeetingStorage`, and `MeetingDetailView` compile and round-trip without modification
 5. `swift test` passes with no regressions to existing test suite
-   **Plans**: TBD
+**Plans**: 2 plans
 
-#### Phase 12: Live Transcription Stream
+Plans:
+- [ ] 10-01-PLAN.md — @Observable MeetingSegment migration with manual Codable and pending-state API
+- [ ] 10-02-PLAN.md — SpeakerBufferManager micro-windows (7s default) and diarizer re-enable with pre-ASR split
+
+#### Phase 11: Live Transcription Stream
 
 **Goal**: ASR output is decoupled from the diarizer batch — text tokens render in the UI as they are decoded, attributed to `[Me]` (mic) or `[Pending]` (system) while diarizer catches up in the background
-**Depends on**: Phase 11
+**Depends on**: Phase 10
 **Requirements**: LIVE-01, LIVE-02, LIVE-03
 **Success Criteria** (what must be TRUE):
 
@@ -176,10 +180,10 @@ Plans:
 4. `swift build` produces zero warnings; no regressions to mic or system audio transcription
    **Plans**: TBD
 
-#### Phase 10: Chat Bubble UI
+#### Phase 12: Chat Bubble UI
 
 **Goal**: MeetingDetailView displays the meeting transcript as iMessage-style grouped chat bubbles — consecutive segments from the same speaker form a single visual group, and speaker labels update in-place when diarizer resolves `[Pending]` attributions
-**Depends on**: Phase 11
+**Depends on**: Phase 10
 **Requirements**: CHAT-01, CHAT-02, CHAT-03, CHAT-04
 **Success Criteria** (what must be TRUE):
 
@@ -193,7 +197,7 @@ Plans:
 #### Phase 13: Reconciler — Async Speaker Enrichment
 
 **Goal**: A background Reconciler actor listens for diarizer metadata packets and retroactively patches `[Pending]` transcript segments with resolved speaker IDs; segments spanning a speaker boundary are split into two
-**Depends on**: Phase 12, Phase 10
+**Depends on**: Phase 11, Phase 12
 **Requirements**: REC-01, REC-02, REC-03
 **Success Criteria** (what must be TRUE):
 
@@ -218,9 +222,9 @@ Plans:
 | 7. DualChannelAudioCapture Streaming | v1.1      | 1/1            | Complete    | 2026-03-22 |
 | 8. MeetingRecorder Pipeline Rewire   | v1.1      | 2/2            | Complete    | 2026-03-22 |
 | 9. Waveform Color Per Speaker        | v1.1      | 5/5            | Complete    | 2026-03-23 |
-| 11. Mutable Data Model + Diarizer    | v1.2      | 0/TBD          | Not started | -          |
-| 12. Live Transcription Stream        | v1.2      | 0/TBD          | Not started | -          |
-| 10. Chat Bubble UI                   | v1.2      | 0/TBD          | Not started | -          |
+| 10. Mutable Data Model + Diarizer    | v1.2      | 0/2            | In progress | -          |
+| 11. Live Transcription Stream        | v1.2      | 0/TBD          | Not started | -          |
+| 12. Chat Bubble UI                   | v1.2      | 0/TBD          | Not started | -          |
 | 13. Reconciler — Async Enrichment    | v1.2      | 0/TBD          | Not started | -          |
 
 ---
