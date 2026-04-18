@@ -35,6 +35,7 @@
 - **D-12:** Pending Speaker State: Додати `case pending` до enum `Speaker`. При `isPending = true`, метод `displaySpeaker` має повертати:
   - `.me` — для мікрофона (визначається відразу).
   - `.pending` — для системного звуку (до моменту вирішення діарізатором).
+- **D-13:** View Implementation Fix: ПОВИННО бути видалено hardcoded логіку `segment.isPending ? "..." : segment.text` у `TranscriptSegmentRow` (`MeetingDetailView.swift`). Натомість використовувати виклики `segment.displaySpeaker.displayName` та `segment.displayText`.
 
 ### Claude's Discretion
 - Вибір конкретної реалізації callback-інтерфейсу в `VoiceToTextProtocol`.
