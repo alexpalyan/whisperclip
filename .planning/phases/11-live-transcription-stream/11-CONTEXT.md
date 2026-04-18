@@ -24,8 +24,10 @@
 
 ### [ARCH] Queue & Performance
 - **D-06:** Sequential Queue: `TranscriptionQueue` залишається послідовною. Одна задача CoreML (Neural Engine) за раз для стабільності на M-чипах.
-- **D-07:** Decoupling: `VoiceToTextModel` тепер не чекає WAV-файлу для всього сегмента, а починає стрімінг токенів через callback.
-- **D-08:** No Deduplication: Відмова від `extractNewText` для Live-шляху. Текст просто додається до кінця сегмента, оскільки стрімінг природно видає послідовність.
+- **D-07:** Architectural Alignment: `MeetingRecorder` ПОВИНЕН використовувати `VoiceToTextFactory` замість прямого виклику `LocalParakeet.loadModel()`, щоб вибір WhisperKit у налаштуваннях став робочим для запису зустрічей.
+- **D-08:** Protocol Extension: `VoiceToTextProtocol` розширюється методом `processStream` (або аналогічним), який приймає callback для передачі токенів.
+- **D-09:** Decoupling: `MeetingRecorder` тепер не чекає завершення всього сегмента, а починає стрімінг токенів через оновлений `VoiceToTextProtocol`.
+- **D-10:** No Deduplication: Відмова від `extractNewText` для Live-шляху. Текст просто додається до кінця сегмента, оскільки стрімінг природно видає послідовність.
 
 ### [BEHAVIOR] Corrections
 - **D-09:** On-the-fly Correction: Дозволяємо тексту "мерехтіти" (змінюватися), поки Whisper уточнює контекст останнього речення.
