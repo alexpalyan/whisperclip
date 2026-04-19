@@ -161,12 +161,11 @@ Plans:
 3. Speaker blending (two speakers sharing one segment due to a late flush) is eliminated — speaker changes trigger a segment boundary within the 7s window
 4. Existing `MeetingSession`, `MeetingStorage`, and `MeetingDetailView` compile and round-trip without modification
 5. `swift test` passes with no regressions to existing test suite
-**Plans**: 2 plans
+**Plans**: 2/2 complete
 
 Plans:
-- [ ] 10-01-PLAN.md — @Observable MeetingSegment migration with manual Codable and pending-state API
-- [ ] 10-02-PLAN.md — SpeakerBufferManager micro-windows (7s default) and diarizer re-enable with pre-ASR split
-
+- [x] 10-01-PLAN.md — @Observable MeetingSegment migration with manual Codable and pending-state API
+- [x] 10-02-PLAN.md — SpeakerBufferManager micro-windows (7s default) and diarizer re-enable with pre-ASR split
 #### Phase 11: Live Transcription Stream
 
 **Goal**: ASR output is decoupled from the diarizer batch — text tokens render in the UI as they are decoded, attributed to `[Me]` (mic) or `[Pending]` (system) while diarizer catches up in the background
@@ -178,13 +177,41 @@ Plans:
 2. System audio transcription renders immediately under `[Pending]` speaker label; label is replaced by the resolved speaker name when diarizer confirms
 3. No audio samples are dropped or duplicated between the fast ASR path and the diarizer micro-window path
 4. `swift build` produces zero warnings; no regressions to mic or system audio transcription
-**Plans**: 4 plans
+**Plans**: 4/4 complete
 
 Plans:
-- [ ] 11-01-PLAN.md — Wave 0: StreamingTests test scaffold (LIVE-01, LIVE-02, LIVE-03)
-- [ ] 11-02-PLAN.md — VoiceToTextProtocol.processStream + VoiceToTextModel WhisperKit streaming (LIVE-01)
-- [ ] 11-03-PLAN.md — Speaker.pending case + displayText/displaySpeaker fixes (LIVE-02)
-- [ ] 11-04-PLAN.md — MeetingRecorder VoiceToTextFactory wiring + TranscriptSegmentRow fix (LIVE-01, LIVE-02, LIVE-03)
+- [x] 11-01-PLAN.md — Wave 0: StreamingTests test scaffold (LIVE-01, LIVE-02, LIVE-03)
+- [x] 11-02-PLAN.md — VoiceToTextProtocol.processStream + VoiceToTextModel WhisperKit streaming (LIVE-01)
+- [x] 11-03-PLAN.md — Speaker.pending case + displayText/displaySpeaker fixes (LIVE-02)
+- [x] 11-04-PLAN.md — MeetingRecorder VoiceToTextFactory wiring + TranscriptSegmentRow fix (LIVE-01, LIVE-02, LIVE-03)
+
+#### Phase 11.1: Audio-Active Pending State (INSERTED)
+
+**Goal**: Implement a multi-stage pending state triggered by voice activity (VAD/energy gate) to provide immediate visual feedback even before ASR tokens arrive
+**Depends on**: Phase 11
+**Requirements**: PENDING-01, PENDING-02, PENDING-03, VAD-01, VAD-02
+**Success Criteria**:
+1. Pending segment row appears immediately upon stable voice activity (200-400ms)
+2. Segments transition from "audio-active" (no text) to "asr-partial" (streaming tokens) to "final" (confirmed text)
+3. Consistent behavior across all STT engines (Parakeet/WhisperKit)
+**Plans**: 4/4 complete ✅ Accepted via manual validation 2026-04-19
+
+Plans:
+- [x] 11.1-01-PLAN.md — Wave 0: VADStateMachineTests stubs (VAD-01, VAD-02)
+- [x] 11.1-02-PLAN.md — VADStateMachine actor + DualChannelAudioCapture.onMicrophoneLevel + SpeakerBufferManager.onSpeechDetected (PENDING-01, VAD-01)
+- [x] 11.1-03-PLAN.md — MeetingRecorder VAD wiring, reconciliation, ghost cleanup + MeetingSession.removeSegment (PENDING-01, PENDING-02, PENDING-03, VAD-02)
+- [x] 11.1-04-PLAN.md — TranscriptSegmentRow dashed border + TypingIndicator (PENDING-02, PENDING-03)
+
+#### Phase 11.2: True Streaming ASR (INSERTED)
+
+**Goal**: Enable true word-by-word streaming ASR for WhisperKit and Parakeet, bypassing 5-10s batches where possible to provide immediate feedback
+**Depends on**: Phase 11.1
+**Requirements**: LIVE-04, LIVE-05, LIVE-06
+**Success Criteria**:
+1. WhisperKit `TranscriptionProgress.text` is used to update the `pending` segment row in real-time
+2. Parakeet engine is extended to support similar streaming tokens if possible
+3. Latency between speech and first token appearance is < 1s
+**Plans**: TBD
 
 #### Phase 12: Chat Bubble UI
 
@@ -228,10 +255,14 @@ Plans:
 | 7. DualChannelAudioCapture Streaming | v1.1      | 1/1            | Complete    | 2026-03-22 |
 | 8. MeetingRecorder Pipeline Rewire   | v1.1      | 2/2            | Complete    | 2026-03-22 |
 | 9. Waveform Color Per Speaker        | v1.1      | 5/5            | Complete    | 2026-03-23 |
-| 10. Mutable Data Model + Diarizer    | v1.2      | 0/2            | In progress | -          |
-| 11. Live Transcription Stream        | v1.2      | 0/4            | Not started | -          |
+| 10. Mutable Data Model + Diarizer    | v1.2      | 2/2            | Complete    | 2026-04-18 |
+| 11. Live Transcription Stream        | v1.2      | 4/4            | Complete    | 2026-04-18 |
+| 11.1 Audio-Active Pending State      | v1.2      | 0/4            | Not started | -          |
+| 11.2 True Streaming ASR              | v1.2      | 0/TBD          | Not started | -          |
 | 12. Chat Bubble UI                   | v1.2      | 0/TBD          | Not started | -          |
 | 13. Reconciler — Async Enrichment    | v1.2      | 0/TBD          | Not started | -          |
+
+\* Code complete and focused verification green; warning-clean build remains open carry-over work.
 
 ---
 

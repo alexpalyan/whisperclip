@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Live Enrichment & Diarization Fix
-status: Phase 10 complete; ready for Phase 11
-stopped_at: Phase 10 PASS (10-01 and 10-02 complete)
-last_updated: "2026-04-18T16:59:21Z"
+status: Phase 11.1 complete; preparing follow-up true streaming work in Phase 11.2
+stopped_at: Phase 11.1 PASS; manual validation accepted and artifacts updated
+last_updated: "2026-04-19T08:20:00Z"
 progress:
-  total_phases: 4
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 25
+  total_phases: 5
+  completed_phases: 4
+  total_plans: 10
+  completed_plans: 10
+  percent: 80
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Точна транскрипція зустрічей з правильною атрибуцією спікерів.
-**Current focus:** Phase 11 — live-transcription-stream
+**Current focus:** Phase 11.2 — true-streaming-asr
 
 ---
 
 ## Current Position
 
-Phase: 10 (mutable-data-model) — COMPLETE
-Next: Phase 11 (live-transcription-stream) — READY
+Phase: 11.1 (audio-active-pending-state) — COMPLETE
+Next: Phase 11.2 (true-streaming-asr) — READY
 
 ## Performance Metrics
 
@@ -103,6 +103,16 @@ Next: Phase 11 (live-transcription-stream) — READY
 - Phase 10 restored mutable transcript segments via `@Observable` `MeetingSegment`, pending/finalize APIs in `MeetingSession`, and in-place transcript row updates without replacing list elements
 - Phase 10 re-enabled diarizer processing with 7-second micro-windows, sample-accurate split helpers, and pending transcript finalization for diarized buffers
 - Phase 10 UAT is accepted as PASS with known carry-over limitations: transient pending UI can still appear in edge cases, and speaker-boundary quality still needs follow-up in Phases 11 and 12
+- Phase 11 added `StreamingTests`, `VoiceToTextProtocol.processStream`, and WhisperKit partial-text callbacks via `TranscriptionProgress.text`
+- Phase 11 introduced `Speaker.pending`, fixed `displayText` / `displaySpeaker`, and routed `MeetingRecorder` through `VoiceToTextFactory` for live pending-segment mutation
+- Phase 11 updated transcript-row rendering to bind to model display helpers so immediate text and pending speaker state reach the UI without duplicated view logic
+- Phase 11.1 added early VAD-driven pending bubbles, `VADStateMachine`, mic-level and diarizer-gated speech callbacks, pending bubble reconciliation, and ghost cleanup
+- Phase 11.1 manual validation passed after fixing two edge cases: stale ghost-cleanup task ownership and WhisperKit empty-final-text fallback to `lastPartialText`
+
+### Roadmap Evolution
+
+- **Phase 11.1:** Inserted "Audio-Active Pending State" after Phase 11. Urgent work to decouple visual pending from ASR first-token arrival using VAD/energy gate (200-400ms activity). (URGENT)
+- **Phase 11.2:** Inserted "True Streaming ASR" after Phase 11.1. Missed during Phase 11 planning; ensures WhisperKit/Parakeet tokens update in real-time. (URGENT)
 
 ### Blockers/Concerns
 
@@ -110,13 +120,13 @@ Next: Phase 11 (live-transcription-stream) — READY
 - Phase 6: clusteringThreshold=0.3 validated for one scenario; verify on 3+ speaker pairs before Phase 8 integration
 - Phase 7: CMSampleBuffer format assumption (32-bit float PCM) needs assertion verified on macOS 14 and 15
 - Phase 10 reduced but did not eliminate split-boundary artifacts; watch for occasional start/end truncation or mixed attribution near speaker changes
-- Live transcription still waits on current recorder/ASR chunk flow; Phase 11 remains the milestone-critical step for immediate render behavior
+- Live transcription path is now immediate at the model/UI layer, but hardware/manual validation for true word-by-word mic/system behavior is still pending.
 - **Swift Concurrency:** Phase 11 implementation leaves multiple strict-concurrency warnings (queue-handoffs) in `MeetingRecorder`. This is a high-priority tech debt that may impact `Reconciler` stability in Phase 13.
 
 ---
 
 ## Session Continuity
 
-Last session: 2026-03-23T09:04:53.214Z
-Stopped at: Phase 10 PASS (10-01 and 10-02 complete)
+Last session: 2026-04-19T08:20:00Z
+Stopped at: Phase 11.1 PASS; next work is Phase 11.2 true streaming research/execution
 Resume file: None
