@@ -27,7 +27,7 @@ class MeetingRecorder: NSObject, ObservableObject {
     // MARK: - Audio Components
 
     private var dualCapture: DualChannelAudioCapture?
-    private var asrManager: AsrManager?
+    private var voiceToText: VoiceToTextProtocol?
     private var diarizerManager: DiarizerManager?
     private var speakerBufferManager: SpeakerBufferManager?
     private var bufferConsumerTask: Task<Void, Never>?
@@ -41,12 +41,19 @@ class MeetingRecorder: NSObject, ObservableObject {
     private var durationTimer: Timer?
     private var transcriptCallback: MeetingTranscriptCallback?
     private var errorCallback: MeetingErrorCallback?
-
-    // Text deduplication for the microphone path
-    private var processedMicTexts: Set<String> = []
+    private var micVAD: VADStateMachine?
+    private var pendingMicSegmentId: UUID?
+    private var pendingSystemSegmentId: UUID?
+    private var ghostMicCleanupTask: Task<Void, Never>?
+    private var ghostSystemCleanupTask: Task<Void, Never>?
     
     // Transcription queue to prevent concurrent CoreML predictions
     private let transcriptionQueue = TranscriptionQueue()
+    private let minimumMicPendingVisibilityNanoseconds: UInt64 = 350_000_000
+    private let minimumSystemPendingVisibilityNanoseconds: UInt64 = 900_000_000
+    private let microphoneSilenceThresholdDB: Float = -45
+    private let micGhostCleanupDelaySeconds: Double = 6.0
+    private let systemGhostCleanupDelaySeconds: Double = 8.0
     
     // MARK: - Configuration
     
@@ -81,13 +88,8 @@ class MeetingRecorder: NSObject, ObservableObject {
         transcriptCallback = onTranscript
         errorCallback = onError
         
-        // Initialize ASR manager
-        do {
-            asrManager = try await LocalParakeet.loadModel()
-        } catch {
-            Logger.log("Failed to load ASR model: \(error)", log: Logger.general, type: .error)
-            throw MeetingRecorderError.modelLoadFailed(error.localizedDescription)
-        }
+        // Initialize ASR engine
+        voiceToText = VoiceToTextFactory.createVoiceToText()
 
         do {
             let diarizer = DiarizerManager()
@@ -100,6 +102,13 @@ class MeetingRecorder: NSObject, ObservableObject {
                 pollingInterval: 150_000_000,
                 microWindowSeconds: 7
             )
+
+            manager.onSpeechDetected = { [weak self] startTime, speakerLabel in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    self.handleSystemSpeechDetected(startTime: startTime, speakerLabel: speakerLabel)
+                }
+            }
 
             diarizerManager = diarizer
             speakerBufferManager = manager
@@ -170,6 +179,12 @@ class MeetingRecorder: NSObject, ObservableObject {
                             await self.accumulateSystemFallback(samples, atTime: time)
                         }
                     }
+                },
+                onMicrophoneLevel: { [weak self] db in
+                    guard let self = self else { return }
+                    Task { @MainActor in
+                        await self.handleMicLevelUpdate(db: db)
+                    }
                 }
             )
         } catch {
@@ -180,9 +195,11 @@ class MeetingRecorder: NSObject, ObservableObject {
         // Initialize state
         startTime = Date()
         isRecording = true
+        micVAD = VADStateMachine(thresholdDB: -45, onsetDuration: .milliseconds(200), offsetDuration: .milliseconds(500))
+        pendingMicSegmentId = nil
+        pendingSystemSegmentId = nil
         segmentCount = 0
         lastError = nil
-        processedMicTexts = []
         systemFallbackBuffer = []
         systemFallbackStartTime = 0
         activeSpeakerLabel = ""
@@ -304,10 +321,13 @@ class MeetingRecorder: NSObject, ObservableObject {
     }
     
     private func cleanup() {
+        ghostMicCleanupTask?.cancel()
+        ghostMicCleanupTask = nil
+        ghostSystemCleanupTask?.cancel()
+        ghostSystemCleanupTask = nil
         transcriptCallback = nil
         errorCallback = nil
-        processedMicTexts = []
-        asrManager = nil
+        voiceToText = nil
         diarizerManager = nil
         dualCapture = nil
         speakerBufferManager = nil
@@ -315,6 +335,9 @@ class MeetingRecorder: NSObject, ObservableObject {
         activeSpeakerLabel = ""
         systemFallbackBuffer = []
         systemFallbackStartTime = 0
+        pendingMicSegmentId = nil
+        pendingSystemSegmentId = nil
+        micVAD = nil
     }
     
     // MARK: - Duration Timer
@@ -375,8 +398,8 @@ class MeetingRecorder: NSObject, ObservableObject {
     }
 
     private func processAudioChunk(source: AudioSource, samples: [Float], startTime: TimeInterval, isFinal: Bool = false) async {
-        guard let asrManager = asrManager else {
-            Logger.log("processAudioChunk: asrManager not available", log: Logger.general, type: .error)
+        guard let voiceToText = voiceToText else {
+            Logger.log("processAudioChunk: voiceToText not available", log: Logger.general, type: .error)
             return
         }
 
@@ -387,21 +410,51 @@ class MeetingRecorder: NSObject, ObservableObject {
 
         let sourceName = source == .microphone ? "mic" : "system"
 
+        if source == .microphone {
+            let averagePower = averagePowerDB(for: samples)
+            guard isFinal || averagePower > microphoneSilenceThresholdDB else {
+                Logger.log(
+                    "processAudioChunk: skipping silent mic chunk at \(String(format: "%.1f", startTime))s (\(String(format: "%.1f", averagePower)) dB)",
+                    log: Logger.general,
+                    type: .debug
+                )
+                return
+            }
+        }
+
         Logger.log("processAudioChunk: processing \(sourceName) chunk with \(samples.count) samples", log: Logger.general)
 
         let chunkDuration = Double(samples.count) / Double(sampleRate)
         let endTime = startTime + chunkDuration
-        let pendingSegment = MeetingSegment(
-            speaker: source.speaker,
-            text: "",
-            startTime: startTime,
-            endTime: endTime,
-            confidence: 0,
-            isPending: true
-        )
-
-        segmentCount += 1
-        transcriptCallback?(pendingSegment)
+        let pendingSegment: MeetingSegment
+        if source == .microphone,
+           let existingId = pendingMicSegmentId,
+           let existing = MeetingSession.shared.liveTranscript.first(where: { $0.id == existingId }) {
+            pendingSegment = existing
+            pendingMicSegmentId = nil
+            ghostMicCleanupTask?.cancel()
+            ghostMicCleanupTask = nil
+        } else if source == .system,
+                  let existingId = pendingSystemSegmentId,
+                  let existing = MeetingSession.shared.liveTranscript.first(where: { $0.id == existingId }),
+                  abs(existing.startTime - startTime) < 6.0 {
+            pendingSegment = existing
+            pendingSystemSegmentId = nil
+            ghostSystemCleanupTask?.cancel()
+            ghostSystemCleanupTask = nil
+        } else {
+            pendingSegment = MeetingSegment(
+                speaker: source.speaker,
+                text: "",
+                startTime: startTime,
+                endTime: endTime,
+                confidence: 0,
+                isPending: true
+            )
+            segmentCount += 1
+            transcriptCallback?(pendingSegment)
+        }
+        let pendingCreatedAt = ContinuousClock.now
 
         // Create temp WAV file for transcription
         let tempURL = FileManager.default.temporaryDirectory
@@ -415,22 +468,29 @@ class MeetingRecorder: NSObject, ObservableObject {
             // Write samples to WAV file
             try writeWAVFile(samples: samples, to: tempURL)
 
-            // Transcribe
-            let transcriptionResult = try await asrManager.transcribe(tempURL)
+            let transcriptionText = try await voiceToText.processStream(
+                filepath: tempURL.path,
+                onEvent: { [weak self, weak pendingSegment] event in
+                    self?.handleStreamingEvent(
+                        event,
+                        for: sourceName,
+                        segment: pendingSegment
+                    )
+                }
+            ) { [weak pendingSegment] partialText in
+                pendingSegment?.text = partialText
+            }
 
-            guard !transcriptionResult.text.isEmpty else {
+            let normalizedText = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedText.isEmpty else {
                 Logger.log("processAudioChunk: empty transcription from \(sourceName)", log: Logger.general)
-                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
+                MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 return
             }
 
-            // Clean and deduplicate based on source
-            let normalizedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let newText = extractNewText(normalizedText, for: source)
-
-            guard !newText.isEmpty else {
-                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
-                Logger.log("processAudioChunk: no new text after deduplication from \(sourceName)", log: Logger.general)
+            if source == .microphone && isFinal && shouldDropDuplicateFinalMicSegment(text: normalizedText, startTime: startTime) {
+                Logger.log("processAudioChunk: dropping duplicate final mic segment '\(normalizedText.prefix(50))'", log: Logger.general)
+                MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 return
             }
 
@@ -438,22 +498,23 @@ class MeetingRecorder: NSObject, ObservableObject {
             // upstream by SpeakerBufferManager and transcribeClosedBuffer(_:).
             let speaker = source.speaker
 
-            // Store for deduplication
-            if source == .microphone {
-                processedMicTexts.insert(newText)
-            }
-
+            await ensureMinimumPendingVisibility(
+                since: pendingCreatedAt,
+                minimumNanoseconds: source == .microphone
+                    ? minimumMicPendingVisibilityNanoseconds
+                    : minimumSystemPendingVisibilityNanoseconds
+            )
             pendingSegment.confidence = 0.95
-            await MeetingSession.shared.finalizeSegment(
+            MeetingSession.shared.finalizeSegment(
                 id: pendingSegment.id,
-                text: newText,
+                text: normalizedText,
                 speaker: speaker
             )
 
-            Logger.log("processAudioChunk: created \(speaker.displayName) segment #\(segmentCount): '\(newText.prefix(50))'", log: Logger.general)
+            Logger.log("processAudioChunk: created \(speaker.displayName) segment #\(segmentCount): '\(normalizedText.prefix(50))'", log: Logger.general)
         } catch {
             pendingSegment.confidence = 0
-            await MeetingSession.shared.finalizeSegment(
+            MeetingSession.shared.finalizeSegment(
                 id: pendingSegment.id,
                 text: "[transcription failed]",
                 speaker: source.speaker
@@ -464,8 +525,8 @@ class MeetingRecorder: NSObject, ObservableObject {
     }
 
     private func transcribeClosedBuffer(_ buffer: ClosedSpeakerBuffer) async {
-        guard let asrManager = asrManager else {
-            Logger.log("transcribeClosedBuffer: asrManager not available", log: Logger.general, type: .error)
+        guard let voiceToText = voiceToText else {
+            Logger.log("transcribeClosedBuffer: voiceToText not available", log: Logger.general, type: .error)
             return
         }
 
@@ -487,37 +548,56 @@ class MeetingRecorder: NSObject, ObservableObject {
         let startTime = buffer.startTime
         let endTime = startTime + chunkDuration
         let speaker = Speaker(displayName: buffer.speakerLabel)
-        let pendingSegment = MeetingSegment(
-            speaker: speaker,
-            text: "",
-            startTime: startTime,
-            endTime: endTime,
-            confidence: 0,
-            isPending: true
-        )
-
-        segmentCount += 1
-        transcriptCallback?(pendingSegment)
+        let pendingSegment: MeetingSegment
+        if let existingId = pendingSystemSegmentId,
+           let existing = MeetingSession.shared.liveTranscript.first(where: { $0.id == existingId }),
+           abs(existing.startTime - startTime) < 6.0 {
+            pendingSegment = existing
+            pendingSystemSegmentId = nil
+            ghostSystemCleanupTask?.cancel()
+            ghostSystemCleanupTask = nil
+        } else {
+            pendingSegment = MeetingSegment(
+                speaker: speaker,
+                text: "",
+                startTime: startTime,
+                endTime: endTime,
+                confidence: 0,
+                isPending: true
+            )
+            segmentCount += 1
+            transcriptCallback?(pendingSegment)
+        }
+        let pendingCreatedAt = ContinuousClock.now
 
         do {
             try writeWAVFile(samples: buffer.samples, to: tempURL)
-            let transcriptionResult = try await asrManager.transcribe(tempURL)
-
-            guard !transcriptionResult.text.isEmpty else {
-                Logger.log("transcribeClosedBuffer: empty transcription from \(sourceName)", log: Logger.general)
-                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
-                return
+            let transcriptionText = try await voiceToText.processStream(
+                filepath: tempURL.path,
+                onEvent: { [weak self, weak pendingSegment] event in
+                    self?.handleStreamingEvent(
+                        event,
+                        for: sourceName,
+                        segment: pendingSegment
+                    )
+                }
+            ) { [weak pendingSegment] partialText in
+                pendingSegment?.text = partialText
             }
 
-            let normalizedText = transcriptionResult.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedText = transcriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !normalizedText.isEmpty else {
-                Logger.log("transcribeClosedBuffer: empty normalized transcription from \(sourceName)", log: Logger.general)
-                await MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
+                Logger.log("transcribeClosedBuffer: empty transcription from \(sourceName)", log: Logger.general)
+                MeetingSession.shared.replaceSegment(id: pendingSegment.id, with: [])
                 return
             }
 
+            await ensureMinimumPendingVisibility(
+                since: pendingCreatedAt,
+                minimumNanoseconds: minimumSystemPendingVisibilityNanoseconds
+            )
             pendingSegment.confidence = 0.95
-            await MeetingSession.shared.finalizeSegment(
+            MeetingSession.shared.finalizeSegment(
                 id: pendingSegment.id,
                 text: normalizedText,
                 speaker: speaker
@@ -529,7 +609,7 @@ class MeetingRecorder: NSObject, ObservableObject {
             )
         } catch {
             pendingSegment.confidence = 0
-            await MeetingSession.shared.finalizeSegment(
+            MeetingSession.shared.finalizeSegment(
                 id: pendingSegment.id,
                 text: "[transcription failed]",
                 speaker: speaker
@@ -542,32 +622,168 @@ class MeetingRecorder: NSObject, ObservableObject {
             lastError = error.localizedDescription
         }
     }
-    
-    /// Extract text that hasn't been seen before for this source
-    private func extractNewText(_ fullText: String, for source: AudioSource) -> String {
-        guard source == .microphone else {
-            return fullText
+
+    private func ensureMinimumPendingVisibility(
+        since start: ContinuousClock.Instant,
+        minimumNanoseconds: UInt64
+    ) async {
+        let elapsed = start.duration(to: .now)
+        let minimum = Duration.nanoseconds(Int64(minimumNanoseconds))
+        guard elapsed < minimum else { return }
+
+        let remaining = minimum - elapsed
+        try? await Task.sleep(for: remaining)
+    }
+
+    private func averagePowerDB(for samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return -160 }
+
+        let rms = sqrt(samples.reduce(Float.zero) { partialResult, sample in
+            partialResult + (sample * sample)
+        } / Float(samples.count))
+        return 20 * log10(max(rms, 0.000_000_1))
+    }
+
+    private func shouldDropDuplicateFinalMicSegment(text: String, startTime: TimeInterval) -> Bool {
+        let normalizedCandidate = normalizedTranscriptText(text)
+        guard !normalizedCandidate.isEmpty else { return false }
+
+        guard let lastFinalMicSegment = MeetingSession.shared.liveTranscript
+            .reversed()
+            .first(where: { !$0.isPending && $0.speaker == .me }) else {
+            return false
         }
-        
-        let processedTexts = processedMicTexts
-        
-        // If this exact text was already processed, skip
-        if processedTexts.contains(fullText) {
-            return ""
+
+        let normalizedPrevious = normalizedTranscriptText(lastFinalMicSegment.text)
+        guard normalizedCandidate == normalizedPrevious else { return false }
+
+        let maxGap: TimeInterval = 6
+        return abs(startTime - lastFinalMicSegment.startTime) <= maxGap
+    }
+
+    private func normalizedTranscriptText(_ text: String) -> String {
+        text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+    }
+
+    // MARK: - VAD Coordination
+
+    private enum AudioChannel {
+        case mic
+        case system
+    }
+
+    private func handleMicLevelUpdate(db: Float) async {
+        guard let vad = micVAD, isRecording else { return }
+        guard let event = await vad.update(levelDB: db) else { return }
+
+        switch event {
+        case .startSpeech:
+            ghostMicCleanupTask?.cancel()
+            ghostMicCleanupTask = nil
+            guard pendingMicSegmentId == nil else { return }
+
+            let now = Date().timeIntervalSince(startTime ?? Date())
+            let segment = createPendingSegment(speaker: .me, startTime: now)
+            pendingMicSegmentId = segment.id
+            Logger.log("VAD mic: created pending segment \(segment.id) at \(String(format: "%.2f", now))s", log: Logger.general)
+        case .endSpeech:
+            startGhostCleanupTask(channel: .mic)
         }
-        
-        // Check if fullText contains any previously processed text as prefix
-        for processed in processedTexts {
-            if fullText.hasPrefix(processed) {
-                // Return only the new part
-                let newPart = String(fullText.dropFirst(processed.count)).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !newPart.isEmpty && !processedTexts.contains(newPart) {
-                    return newPart
-                }
+    }
+
+    private func handleSystemSpeechDetected(startTime: TimeInterval, speakerLabel: String) {
+        guard pendingSystemSegmentId == nil else { return }
+
+        let speaker = Speaker(displayName: speakerLabel)
+        let segment = createPendingSegment(speaker: speaker, startTime: startTime)
+        pendingSystemSegmentId = segment.id
+        Logger.log(
+            "VAD system: created pending segment \(segment.id) for \(speakerLabel) at \(String(format: "%.2f", startTime))s",
+            log: Logger.general
+        )
+        startGhostCleanupTask(channel: .system)
+    }
+
+    @discardableResult
+    private func createPendingSegment(speaker: Speaker, startTime: TimeInterval) -> MeetingSegment {
+        let segment = MeetingSegment(
+            speaker: speaker,
+            text: "",
+            startTime: startTime,
+            endTime: startTime,
+            confidence: 0,
+            isPending: true
+        )
+        segmentCount += 1
+        transcriptCallback?(segment)
+        return segment
+    }
+
+    private func startGhostCleanupTask(channel: AudioChannel) {
+        switch channel {
+        case .mic:
+            guard let pendingID = pendingMicSegmentId else { return }
+            ghostMicCleanupTask?.cancel()
+            ghostMicCleanupTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(self?.micGhostCleanupDelaySeconds ?? 6.0))
+                guard !Task.isCancelled, let self = self else { return }
+                self.cleanupGhostSegment(channel: .mic, expectedSegmentID: pendingID)
+            }
+        case .system:
+            guard let pendingID = pendingSystemSegmentId else { return }
+            ghostSystemCleanupTask?.cancel()
+            ghostSystemCleanupTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(self?.systemGhostCleanupDelaySeconds ?? 8.0))
+                guard !Task.isCancelled, let self = self else { return }
+                self.cleanupGhostSegment(channel: .system, expectedSegmentID: pendingID)
             }
         }
-        
-        return fullText
+    }
+
+    private func cleanupGhostSegment(channel: AudioChannel, expectedSegmentID: UUID) {
+        switch channel {
+        case .mic:
+            guard let id = pendingMicSegmentId else { return }
+            guard id == expectedSegmentID else { return }
+            if let segment = MeetingSession.shared.liveTranscript.first(where: { $0.id == id }),
+               segment.text.isEmpty {
+                Logger.log("VAD mic: removing ghost segment \(id)", log: Logger.general)
+                MeetingSession.shared.removeSegment(id: id)
+            }
+            pendingMicSegmentId = nil
+        case .system:
+            guard let id = pendingSystemSegmentId else { return }
+            guard id == expectedSegmentID else { return }
+            if let segment = MeetingSession.shared.liveTranscript.first(where: { $0.id == id }),
+               segment.text.isEmpty {
+                Logger.log("VAD system: removing ghost segment \(id)", log: Logger.general)
+                MeetingSession.shared.removeSegment(id: id)
+            }
+            pendingSystemSegmentId = nil
+        }
+    }
+
+    private func handleStreamingEvent(
+        _ event: StreamingTranscriptionEvent,
+        for sourceName: String,
+        segment: MeetingSegment?
+    ) {
+        switch event {
+        case .convertingAudio:
+            Logger.log("processAudioChunk: \(sourceName) audio accepted by ASR pipeline", log: Logger.general)
+        case .decodingStarted:
+            Logger.log("processAudioChunk: \(sourceName) decoder started", log: Logger.general)
+        case .firstToken:
+            Logger.log("processAudioChunk: \(sourceName) produced first token", log: Logger.general)
+            if let segment, segment.text.isEmpty {
+                segment.text = "…"
+            }
+        case .finished:
+            Logger.log("processAudioChunk: \(sourceName) decoder finished", log: Logger.general)
+        }
     }
     
     // MARK: - Helpers

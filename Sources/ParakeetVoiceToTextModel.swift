@@ -57,4 +57,48 @@ class ParakeetVoiceToTextModel: VoiceToTextProtocol {
 
         return transcription
     }
+
+    func processStream(
+        filepath: String,
+        onEvent: @escaping @MainActor @Sendable (StreamingTranscriptionEvent) -> Void,
+        onToken: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws -> String {
+        try await load()
+
+        guard let manager = self.manager else {
+            throw NSError(domain: "Transcriber", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Parakeet manager not available"])
+        }
+
+        if GenericHelper.logSensitiveData() {
+            Logger.log("Sending streaming transcription query to Parakeet (FluidAudio)", log: Logger.general)
+        }
+        let ts = TimeSpenter()
+        await MainActor.run {
+            onEvent(.convertingAudio)
+            onEvent(.decodingStarted)
+        }
+
+        let audioURL = URL(fileURLWithPath: filepath)
+        let result = try await manager.transcribe(audioURL)
+        let transcription = result.text
+
+        if GenericHelper.logSensitiveData() {
+            Logger.log("Received streaming transcription result from Parakeet in \(ts.getDelay()) us", log: Logger.general)
+            Logger.log("Parakeet streaming transcription: '\(transcription)'", log: Logger.general)
+        }
+
+        if !transcription.isEmpty {
+            await MainActor.run {
+                onEvent(.firstToken)
+                onToken(transcription)
+            }
+        }
+
+        await MainActor.run {
+            onEvent(.finished)
+        }
+
+        return transcription
+    }
 }

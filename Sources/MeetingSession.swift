@@ -310,6 +310,17 @@ class MeetingSession: ObservableObject {
             }
         }
     }
+
+    func removeSegment(id: UUID) {
+        guard let index = liveTranscript.firstIndex(where: { $0.id == id }) else {
+            Logger.log("MeetingSession.removeSegment: segment \(id) not found", log: Logger.general)
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            liveTranscript.remove(at: index)
+        }
+    }
     
     // MARK: - Summary Generation
     

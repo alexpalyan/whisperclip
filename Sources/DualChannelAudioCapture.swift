@@ -57,6 +57,7 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     private var levelTimer: Timer?
     private var audioCallback: AudioChunkCallback?
     nonisolated(unsafe) private var onSystemBatch: (@Sendable ([Float], TimeInterval) -> Void)?
+    nonisolated(unsafe) private var onMicrophoneLevel: (@Sendable (Float) -> Void)?
     
     // MARK: - Initialization
     
@@ -85,7 +86,8 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     /// Start capturing from both microphone and system audio
     func startCapture(
         onAudioChunk: @escaping AudioChunkCallback,
-        onSystemBatch: @escaping @Sendable ([Float], TimeInterval) -> Void
+        onSystemBatch: @escaping @Sendable ([Float], TimeInterval) -> Void,
+        onMicrophoneLevel: (@Sendable (Float) -> Void)? = nil
     ) async throws {
         guard !isCapturing else {
             throw DualChannelError.alreadyCapturing
@@ -93,6 +95,7 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         
         audioCallback = onAudioChunk
         self.onSystemBatch = onSystemBatch
+        self.onMicrophoneLevel = onMicrophoneLevel
         startTime = Date()
         
         // Start microphone capture
@@ -143,10 +146,11 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         
         // Drain remaining microphone audio from buffers (awaited, not fire-and-forget)
         let micResult = await audioBuffers.getMicSamples()
-        
+
         isCapturing = false
         audioCallback = nil
         onSystemBatch = nil
+        onMicrophoneLevel = nil
         
         Logger.log("Dual channel audio capture stopped", log: Logger.general)
         
@@ -213,10 +217,14 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         
         // Update level from recent samples
         if samples.count > 0 {
-            let rms = sqrt(samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count))
+            var rms: Float = 0
+            vDSP_rmsqv(samples, 1, &rms, vDSP_Length(samples.count))
             let db = 20 * log10(max(rms, 0.0001))
             Task { @MainActor in
                 self.micLevel = db
+            }
+            if let levelCallback = self.onMicrophoneLevel {
+                levelCallback(db)
             }
         }
         

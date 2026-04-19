@@ -509,9 +509,13 @@ struct LiveSegmentRow: View {
                         .foregroundColor(.gray)
                 }
                 
-                Text(segment.text)
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.9))
+                if segment.isPending && segment.text.isEmpty {
+                    TypingIndicator()
+                } else {
+                    Text(segment.text)
+                        .font(.system(size: 14))
+                        .foregroundColor(segment.isPending ? .secondary : .white.opacity(0.9))
+                }
             }
             
             Spacer()
@@ -520,6 +524,12 @@ struct LiveSegmentRow: View {
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .foregroundColor(segment.isPending ? Color.gray.opacity(0.4) : Color.clear)
+                .animation(.easeInOut(duration: 0.2), value: segment.isPending)
         )
     }
     

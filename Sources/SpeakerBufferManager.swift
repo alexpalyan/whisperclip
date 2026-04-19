@@ -36,6 +36,7 @@ actor SpeakerBufferManager {
 
     private let diarizer: any DiarizationProvider
     private var continuation: AsyncStream<ClosedSpeakerBuffer>.Continuation?
+    nonisolated(unsafe) var onSpeechDetected: (@Sendable (TimeInterval, String) -> Void)?
 
     // MARK: - Buffer State
 
@@ -150,6 +151,10 @@ actor SpeakerBufferManager {
 
             guard let dominantId = durationBySpeaker.max(by: { $0.value < $1.value })?.key,
                   !dominantId.isEmpty else { return }
+
+            if let onSpeech = self.onSpeechDetected {
+                onSpeech(bufferStartTime, resolveLabel(for: dominantId))
+            }
 
             // Speaker change detection
             if let current = currentSpeakerId, current != dominantId {
