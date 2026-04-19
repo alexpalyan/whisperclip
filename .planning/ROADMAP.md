@@ -211,7 +211,13 @@ Plans:
 1. WhisperKit `TranscriptionProgress.text` is used to update the `pending` segment row in real-time
 2. Parakeet engine is extended to support similar streaming tokens if possible
 3. Latency between speech and first token appearance is < 1s
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+- [ ] 11.2-01-PLAN.md — Wave 0 test scaffold: LCP, last-word truncation, backpressure (LIVE-04, LIVE-05)
+- [ ] 11.2-02-PLAN.md — VoiceToTextProtocol session API + WhisperKit sliding-window + LCP adapter (LIVE-04, LIVE-06)
+- [ ] 11.2-03-PLAN.md — Parakeet StreamingEouAsrManager sessions + TranscriptionQueue priority lanes (LIVE-05, LIVE-06)
+- [ ] 11.2-04-PLAN.md — MeetingRecorder fragment wiring + DualChannelAudioCapture timer removal (LIVE-04, LIVE-05, LIVE-06)
 
 #### Phase 12: Chat Bubble UI
 
@@ -257,8 +263,8 @@ Plans:
 | 9. Waveform Color Per Speaker        | v1.1      | 5/5            | Complete    | 2026-03-23 |
 | 10. Mutable Data Model + Diarizer    | v1.2      | 2/2            | Complete    | 2026-04-18 |
 | 11. Live Transcription Stream        | v1.2      | 4/4            | Complete    | 2026-04-18 |
-| 11.1 Audio-Active Pending State      | v1.2      | 0/4            | Not started | -          |
-| 11.2 True Streaming ASR              | v1.2      | 0/TBD          | Not started | -          |
+| 11.1 Audio-Active Pending State      | v1.2      | 4/4            | Complete    | 2026-04-19 |
+| 11.2 True Streaming ASR              | v1.2      | 0/4            | Not started | -          |
 | 12. Chat Bubble UI                   | v1.2      | 0/TBD          | Not started | -          |
 | 13. Reconciler — Async Enrichment    | v1.2      | 0/TBD          | Not started | -          |
 
