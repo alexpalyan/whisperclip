@@ -40,7 +40,10 @@ let package = Package(
         ),
         .testTarget(
             name: "WhisperClipTests",
-            dependencies: ["WhisperClip"],
+            dependencies: [
+                "WhisperClip",
+                .product(name: "FluidAudio", package: "FluidAudio"),
+            ],
             path: "Tests"
         )
     ],

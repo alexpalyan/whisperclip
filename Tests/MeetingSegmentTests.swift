@@ -17,7 +17,7 @@ final class MeetingSegmentTests: XCTestCase {
 
         XCTAssertTrue(segment.isPending, "Segment created with isPending: true must remain pending")
         XCTAssertEqual(segment.displayText, "...")
-        XCTAssertEqual(segment.displaySpeaker, .unknown)
+        XCTAssertEqual(segment.displaySpeaker, .pending)
     }
 
     func testFinalizeSegmentUpdatesInPlace() throws {

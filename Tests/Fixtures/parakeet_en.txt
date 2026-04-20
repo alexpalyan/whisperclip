@@ -1,0 +1,1 @@
+This is a Parakeet streaming test. We are checking whether the model returns partial and final transcription.

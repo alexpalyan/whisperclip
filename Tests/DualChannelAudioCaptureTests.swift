@@ -54,6 +54,30 @@ final class DualChannelAudioCaptureTests: XCTestCase {
         XCTAssertFalse(called, "onSystemBatch should NOT be called for zero-byte buffer")
     }
 
+    @MainActor
+    func testDispatchMicrophoneSamplesCallsAudioChunkImmediately() async throws {
+        let capture = DualChannelAudioCapture()
+        let expectedSamples: [Float] = [0.1, 0.2, 0.3]
+        let elapsed: TimeInterval = 0.75
+        var receivedSource: AudioSource?
+        var receivedSamples: [Float] = []
+        var receivedTime: TimeInterval?
+
+        capture.dispatchMicrophoneSamples(
+            expectedSamples,
+            elapsed: elapsed,
+            callbackOverride: { source, samples, startTime in
+                receivedSource = source
+                receivedSamples = samples
+                receivedTime = startTime
+            }
+        )
+
+        XCTAssertEqual(receivedSource, .microphone)
+        assertFloatArraysEqual(receivedSamples, expectedSamples, accuracy: 0.0001)
+        XCTAssertEqual(receivedTime, elapsed)
+    }
+
     /// Compare two Float arrays element-wise with tolerance.
     private func assertFloatArraysEqual(
         _ a: [Float]?,
