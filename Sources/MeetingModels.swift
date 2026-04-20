@@ -12,6 +12,8 @@ enum Speaker: Codable, Hashable {
     case unknown
     /// A diarized speaker with a human-readable label such as "Speaker 1".
     case labeled(String)
+    /// System audio awaiting speaker attribution.
+    case pending
 
     // MARK: Codable
 
@@ -24,6 +26,7 @@ enum Speaker: Codable, Hashable {
             case "Me":      self = .me
             case "Other":   self = .other
             case "Unknown": self = .unknown
+            case "Pending": self = .pending
             default:        self = .labeled(raw)
             }
             return
@@ -34,6 +37,7 @@ enum Speaker: Codable, Hashable {
         case "me":      self = .me
         case "other":   self = .other
         case "labeled": self = .labeled(try container.decode(String.self, forKey: .label))
+        case "pending": self = .pending
         default:        self = .unknown
         }
     }
@@ -43,6 +47,7 @@ enum Speaker: Codable, Hashable {
         switch displayName {
         case "Me":      self = .me
         case "Other":   self = .other
+        case "Pending": self = .pending
         case "Unknown", "": self = .unknown
         default:        self = .labeled(displayName)
         }
@@ -56,6 +61,8 @@ enum Speaker: Codable, Hashable {
             var c = encoder.singleValueContainer(); try c.encode("Other")
         case .unknown:
             var c = encoder.singleValueContainer(); try c.encode("Unknown")
+        case .pending:
+            var c = encoder.singleValueContainer(); try c.encode("Pending")
         case .labeled(let label):
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode("labeled", forKey: .type)
@@ -70,6 +77,7 @@ enum Speaker: Codable, Hashable {
         case .me:             return "Me"
         case .other:          return "Other"
         case .unknown:        return "Unknown"
+        case .pending:        return "Pending"
         case .labeled(let l): return l
         }
     }
@@ -79,6 +87,7 @@ enum Speaker: Codable, Hashable {
         case .me:      return "person.fill"
         case .other:   return "person.2.fill"
         case .unknown: return "questionmark.circle"
+        case .pending: return "ellipsis.circle"
         case .labeled: return "person.crop.circle"
         }
     }
@@ -91,6 +100,7 @@ enum Speaker: Codable, Hashable {
         switch self {
         case .me:             return 0
         case .other:          return 1
+        case .pending:        return 8
         case .unknown:        return 9
         case .labeled(let l): return 2 + abs(l.hashValue) % 7
         }
@@ -107,6 +117,7 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
     let endTime: TimeInterval
     var confidence: Float
     var isPending: Bool
+    var isAwaitingFinalPartial: Bool
 
     init(
         speaker: Speaker,
@@ -114,7 +125,8 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
         startTime: TimeInterval,
         endTime: TimeInterval,
         confidence: Float = 1.0,
-        isPending: Bool = false
+        isPending: Bool = false,
+        isAwaitingFinalPartial: Bool = false
     ) {
         self.id = UUID()
         self.speaker = speaker
@@ -123,6 +135,7 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
         self.endTime = endTime
         self.confidence = confidence
         self.isPending = isPending
+        self.isAwaitingFinalPartial = isAwaitingFinalPartial
     }
 
     var duration: TimeInterval {
@@ -136,11 +149,12 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
     }
 
     var displayText: String {
-        isPending ? "..." : text
+        text.isEmpty ? "..." : text
     }
 
     var displaySpeaker: Speaker {
-        isPending ? .unknown : speaker
+        guard isPending else { return speaker }
+        return speaker == .me ? .me : .pending
     }
 
     enum CodingKeys: String, CodingKey {
@@ -151,6 +165,7 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
         case endTime
         case confidence
         case isPending
+        case isAwaitingFinalPartial
     }
 
     required init(from decoder: Decoder) throws {
@@ -162,6 +177,7 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
         self.endTime = try container.decode(TimeInterval.self, forKey: .endTime)
         self.confidence = try container.decodeIfPresent(Float.self, forKey: .confidence) ?? 1.0
         self.isPending = try container.decodeIfPresent(Bool.self, forKey: .isPending) ?? false
+        self.isAwaitingFinalPartial = try container.decodeIfPresent(Bool.self, forKey: .isAwaitingFinalPartial) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -173,6 +189,7 @@ final class MeetingSegment: Identifiable, Codable, Hashable {
         try container.encode(endTime, forKey: .endTime)
         try container.encode(confidence, forKey: .confidence)
         try container.encode(isPending, forKey: .isPending)
+        try container.encode(isAwaitingFinalPartial, forKey: .isAwaitingFinalPartial)
     }
 
     static func == (lhs: MeetingSegment, rhs: MeetingSegment) -> Bool {

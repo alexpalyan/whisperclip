@@ -286,6 +286,7 @@ class MeetingSession: ObservableObject {
             segment.text = text
             segment.speaker = speaker
             segment.isPending = false
+            segment.isAwaitingFinalPartial = false
         }
 
         if let meetingId = currentMeetingId {
@@ -319,6 +320,17 @@ class MeetingSession: ObservableObject {
 
         withAnimation(.easeInOut(duration: 0.2)) {
             liveTranscript.remove(at: index)
+        }
+    }
+
+    func markSegmentAwaitingFinalPartial(id: UUID, isAwaiting: Bool) {
+        guard let segment = liveTranscript.first(where: { $0.id == id }) else {
+            Logger.log("MeetingSession.markSegmentAwaitingFinalPartial: segment \(id) not found", log: Logger.general)
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            segment.isAwaitingFinalPartial = isAwaiting
         }
     }
     

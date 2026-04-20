@@ -667,6 +667,7 @@ struct MeetingDetailView: View {
 
 struct TranscriptSegmentRow: View {
     let segment: MeetingSegment
+    @State private var pulseAnimation = false
     
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -698,8 +699,22 @@ struct TranscriptSegmentRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 .foregroundColor(segment.isPending ? Color.gray.opacity(0.4) : Color.clear)
+                .scaleEffect(segment.isAwaitingFinalPartial && pulseAnimation ? 1.01 : 1.0)
+                .opacity(segment.isAwaitingFinalPartial && pulseAnimation ? 0.8 : 1.0)
                 .animation(.easeInOut(duration: 0.2), value: segment.isPending)
+                .animation(
+                    segment.isAwaitingFinalPartial
+                        ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true)
+                        : .default,
+                    value: pulseAnimation
+                )
         )
+        .onAppear {
+            pulseAnimation = segment.isAwaitingFinalPartial
+        }
+        .onChange(of: segment.isAwaitingFinalPartial) { _, newValue in
+            pulseAnimation = newValue
+        }
     }
     
     private var speakerColor: Color {
