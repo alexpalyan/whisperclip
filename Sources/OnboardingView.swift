@@ -132,12 +132,13 @@ struct OnboardingView: View {
             • Optimized for Apple Neural Engine
             • Supports 25 European languages
             • Fast inference on Apple Silicon
+            • Installs both offline and real-time Parakeet models
 
             This is the default speech-to-text engine.
             """,
             imageName: "waveform.badge.plus",
             buttonText: "Download",
-            source: "https://huggingface.co/\(ParakeetModelRepo)/\(ParakeetModelName)",
+            source: "https://huggingface.co/FluidInference/parakeet-realtime-eou-120m-coreml",
             action: { [self] progress in
                 Task {
                     do {

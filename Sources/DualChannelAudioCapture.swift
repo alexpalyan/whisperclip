@@ -47,13 +47,11 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
     // MARK: - Configuration
     
     let sampleRate: Int = 16000
-    private let chunkDuration: TimeInterval = 5.0  // Process every 5 seconds
     
     // MARK: - State
     
     /// Set once before capture starts, read from nonisolated audio callbacks
     nonisolated(unsafe) private var startTime: Date?
-    private var chunkTimer: Timer?
     private var levelTimer: Timer?
     private var audioCallback: AudioChunkCallback?
     nonisolated(unsafe) private var onSystemBatch: (@Sendable ([Float], TimeInterval) -> Void)?
@@ -109,9 +107,6 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
             lastError = "System audio permission not granted. Only your voice will be captured."
         }
         
-        // Start chunk processing timer
-        startChunkProcessing()
-        
         // Start level monitoring
         startLevelMonitoring()
         
@@ -129,8 +124,6 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         }
         
         // Stop timers
-        chunkTimer?.invalidate()
-        chunkTimer = nil
         levelTimer?.invalidate()
         levelTimer = nil
         
@@ -230,9 +223,7 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         
         // Add to buffer using actor with elapsed time
         let elapsed = self.startTime.map { Date().timeIntervalSince($0) } ?? 0
-        Task {
-            await self.audioBuffers.appendMicSamples(samples, atTime: elapsed)
-        }
+        dispatchMicrophoneSamples(samples, elapsed: elapsed)
     }
     
     // MARK: - System Audio Capture
@@ -270,32 +261,6 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
         Logger.log("System audio capture started", log: Logger.general)
     }
     
-    // MARK: - Chunk Processing
-    
-    private func startChunkProcessing() {
-        chunkTimer = Timer.scheduledTimer(withTimeInterval: chunkDuration, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.processChunks()
-            }
-        }
-    }
-    
-    private func processChunks() {
-        guard let callback = audioCallback else { return }
-        
-        let minSamples = sampleRate * 2  // At least 2 seconds
-        
-        // Process buffers asynchronously, using per-source timestamps
-        Task {
-            // Get microphone samples with their actual start time
-            let micResult = await audioBuffers.getMicSamples()
-            if micResult.samples.count >= minSamples {
-                Logger.log("Processing microphone chunk: \(micResult.samples.count) samples at \(String(format: "%.1f", micResult.startTime))s", log: Logger.general)
-                callback(.microphone, micResult.samples, micResult.startTime)
-            }
-        }
-    }
-
     /// Processes raw system audio buffer data and invokes onSystemBatch.
     /// Extracted for testability - SCStreamOutput handler calls this after format validation.
     nonisolated internal func processSystemAudioSamples(
@@ -313,6 +278,25 @@ class DualChannelAudioCapture: NSObject, ObservableObject {
             )
         )
         onSystemBatch(samples, elapsed)
+    }
+
+    /// Routes converted microphone samples to the live callback immediately.
+    /// Falls back to buffering only when the live callback is unavailable.
+    internal func dispatchMicrophoneSamples(
+        _ samples: [Float],
+        elapsed: TimeInterval,
+        callbackOverride: AudioChunkCallback? = nil
+    ) {
+        guard !samples.isEmpty else { return }
+
+        if let callback = callbackOverride ?? audioCallback {
+            callback(.microphone, samples, elapsed)
+            return
+        }
+
+        Task {
+            await self.audioBuffers.appendMicSamples(samples, atTime: elapsed)
+        }
     }
     
     // MARK: - Level Monitoring

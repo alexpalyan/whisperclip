@@ -4,6 +4,9 @@ enum StreamingTranscriptionEvent: Sendable, Equatable {
     case convertingAudio
     case decodingStarted
     case firstToken
+    case lcpCommitted
+    case sessionStarted
+    case sessionStopped
     case finished
 }
 
@@ -25,6 +28,22 @@ protocol VoiceToTextProtocol {
         onEvent: @escaping @MainActor @Sendable (StreamingTranscriptionEvent) -> Void,
         onToken: @escaping @MainActor @Sendable (String) -> Void
     ) async throws -> String
+
+    func startStreamingSession(source: AudioSource) async throws
+
+    func feedFragment(
+        _ samples: [Float],
+        source: AudioSource,
+        onToken: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws
+
+    func stopStreamingSession(source: AudioSource) async throws
+
+    func bestStreamingText(source: AudioSource) async -> String?
+
+    func finalizeStreamingText(source: AudioSource) async throws -> String?
+
+    func finalizeStreamingText(samples: [Float], source: AudioSource) async throws -> String?
 }
 
 extension VoiceToTextProtocol {
@@ -43,5 +62,32 @@ extension VoiceToTextProtocol {
             onEvent(.finished)
         }
         return result
+    }
+
+    func startStreamingSession(source: AudioSource) async throws { }
+
+    func feedFragment(
+        _ samples: [Float],
+        source: AudioSource,
+        onToken: @escaping @MainActor @Sendable (String) -> Void
+    ) async throws {
+        guard !samples.isEmpty else { return }
+        Logger.log(
+            "feedFragment: fallback path (no streaming session) for \(source)",
+            log: Logger.general,
+            type: .debug
+        )
+    }
+
+    func stopStreamingSession(source: AudioSource) async throws { }
+
+    func bestStreamingText(source: AudioSource) async -> String? { nil }
+
+    func finalizeStreamingText(source: AudioSource) async throws -> String? {
+        await bestStreamingText(source: source)
+    }
+
+    func finalizeStreamingText(samples: [Float], source: AudioSource) async throws -> String? {
+        try await finalizeStreamingText(source: source)
     }
 }

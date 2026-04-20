@@ -143,7 +143,6 @@ class ModelStorage {
         if !GenericHelper.folderExists(folder: modelDir) {
             return false
         }
-        Logger.log("Model modelRepo: \(modelRepo), modelName: \(modelName) already exists at \(modelDir.path)", log: Logger.general)
 
         let hashFile = modelDir.appendingPathComponent(digestFileName)
         guard GenericHelper.fileExists(file: hashFile) else {
@@ -258,11 +257,11 @@ class ModelStorage {
     // MARK: - Parakeet Model Support
     
     func parakeetModelsExist() -> Bool {
-        return LocalParakeet.modelsExist()
+        return LocalParakeet.modelsExist() && LocalParakeet.streamingModelsExist()
     }
     
     func parakeetModelsLoaded() -> Bool {
-        return LocalParakeet.modelsExist()
+        return parakeetModelsExist()
     }
     
     func downloadParakeetModels(progress: @escaping (Double) -> Void) async throws {
@@ -271,10 +270,11 @@ class ModelStorage {
     
     func deleteParakeetModels() throws {
         try LocalParakeet.deleteModels()
+        try LocalParakeet.deleteStreamingModels()
     }
     
     func getParakeetModelsSize() -> Int64 {
-        return LocalParakeet.getModelsSize()
+        return LocalParakeet.getModelsSize() + LocalParakeet.getStreamingModelsSize()
     }
     
     // MARK: - Diarizer Model Support (for Meeting Notes)
