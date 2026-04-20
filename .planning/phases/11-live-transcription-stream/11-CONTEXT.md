@@ -38,6 +38,8 @@
   - `.pending` — для системного звуку (до моменту вирішення діарізатором).
 - **D-13:** View Implementation Fix: ПОВИННО бути видалено hardcoded логіку `segment.isPending ? "..." : segment.text` у `TranscriptSegmentRow` (`MeetingDetailView.swift`). Натомість використовувати виклики `segment.displaySpeaker.displayName` та `segment.displayText`.
 
+- **D-15:** Dead Code Removal: Видалити з `MeetingRecorder` мертвий код після міграції на `VoiceToTextFactory`: поле `asrManager: AsrManager?`, множину `processedMicTexts: Set<String>` та метод `extractNewText(_:for:)` (замінений D-10).
+
 ### Claude's Discretion
 - Вибір конкретної реалізації callback-інтерфейсу в `VoiceToTextProtocol`.
 - Деталі візуального "dimming" ефекту для тексту в стані очікування.

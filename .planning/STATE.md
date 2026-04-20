@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Live Enrichment & Diarization Fix
-status: Phase 11.1 complete; preparing follow-up true streaming work in Phase 11.2
-stopped_at: Phase 11.1 PASS; manual validation accepted and artifacts updated
-last_updated: "2026-04-19T08:20:00Z"
+status: Phase 11.2 complete; true streaming ASR shipped and verified
+stopped_at: Phase 11.2 PASS; streaming and full-suite verification accepted
+last_updated: "2026-04-19T10:59:42Z"
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 10
-  completed_plans: 10
-  percent: 80
+  completed_phases: 5
+  total_plans: 14
+  completed_plans: 14
+  percent: 100
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Точна транскрипція зустрічей з правильною атрибуцією спікерів.
-**Current focus:** Phase 11.2 — true-streaming-asr
+**Current focus:** Phase 12 planning — chat-bubble-ui
 
 ---
 
 ## Current Position
 
-Phase: 11.1 (audio-active-pending-state) — COMPLETE
-Next: Phase 11.2 (true-streaming-asr) — READY
+Phase: 11.2 (true-streaming-asr) — COMPLETE
+Next: Phase 12 (chat-bubble-ui) — READY
 
 ## Performance Metrics
 
@@ -108,6 +108,7 @@ Next: Phase 11.2 (true-streaming-asr) — READY
 - Phase 11 updated transcript-row rendering to bind to model display helpers so immediate text and pending speaker state reach the UI without duplicated view logic
 - Phase 11.1 added early VAD-driven pending bubbles, `VADStateMachine`, mic-level and diarizer-gated speech callbacks, pending bubble reconciliation, and ghost cleanup
 - Phase 11.1 manual validation passed after fixing two edge cases: stale ghost-cleanup task ownership and WhisperKit empty-final-text fallback to `lastPartialText`
+- Phase 11.2 added streaming-session lifecycle methods to `VoiceToTextProtocol`, WhisperKit LCP/truncation helpers, priority fragment lanes in `TranscriptionQueue`, Parakeet `StreamingEouAsrManager` sessions, and 300ms microphone fragment wiring in `MeetingRecorder`
 
 ### Roadmap Evolution
 
@@ -120,13 +121,13 @@ Next: Phase 11.2 (true-streaming-asr) — READY
 - Phase 6: clusteringThreshold=0.3 validated for one scenario; verify on 3+ speaker pairs before Phase 8 integration
 - Phase 7: CMSampleBuffer format assumption (32-bit float PCM) needs assertion verified on macOS 14 and 15
 - Phase 10 reduced but did not eliminate split-boundary artifacts; watch for occasional start/end truncation or mixed attribution near speaker changes
-- Live transcription path is now immediate at the model/UI layer, but hardware/manual validation for true word-by-word mic/system behavior is still pending.
+- Live transcription path now includes true fragment-based microphone streaming and queue-level backpressure. Hardware/manual latency validation for real meeting conditions remains a follow-up check.
 - **Swift Concurrency:** Phase 11 implementation leaves multiple strict-concurrency warnings (queue-handoffs) in `MeetingRecorder`. This is a high-priority tech debt that may impact `Reconciler` stability in Phase 13.
 
 ---
 
 ## Session Continuity
 
-Last session: 2026-04-19T08:20:00Z
-Stopped at: Phase 11.1 PASS; next work is Phase 11.2 true streaming research/execution
+Last session: 2026-04-19T10:59:42Z
+Stopped at: Phase 11.2 PASS; next work is Phase 12 planning or hardware validation follow-up
 Resume file: None
